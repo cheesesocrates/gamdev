@@ -62,6 +62,9 @@ const doStation = async (id) => {
   const label = () => ev((sid) => { const s = window.__HT.scene; const st = s.stations.list.find((x) => x.def.id === sid); const a = s.stations.actionFor(st); return a ? a.label : null; }, id);
   const before = await label();
   await page.keyboard.down("KeyE");
+  await sleep(600);
+  await ev(() => { const m = window.__HT.scene.mini; if (m) m.win(); });
+  await sleep(700);
   const t = Date.now();
   while (Date.now() - t < 30000) {
     await sleep(250);
@@ -101,11 +104,10 @@ try {
 
   if (scenario === "full") {
     await shot("02-crunch-start");
-    await doStation("emails");
-    await doStation("copier_main");
-    await doStation("shredder");
-    await doStation("coffee");
-    await doStation("presentation");
+    const stationOf = { emails: "emails", print: "copier_main", shred: "shredder", coffee: "coffee", presentation: "presentation", memos: "memos", server: "server", plant: "ceo_plant" };
+    const todo = await ev(() => window.__HT.scene.dayCfg.chores.filter((c) => !window.__HT.scene.choresDone.has(c)));
+    console.log("chores today:", todo.join(", "));
+    for (const c of todo) await doStation(stationOf[c]);
     const coolers = await ev(() => window.__HT.scene.stations.list.filter((s) => s.def.kind === "cooler").map((s) => s.def.id));
     await doStation(coolers[coolers.length - 1]);
     await doStation("copier_2");

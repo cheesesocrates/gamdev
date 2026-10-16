@@ -42,6 +42,10 @@ export interface Stats {
   nuke: boolean;
   hazardMult: number;
   electric: boolean;
+  sabotageMult: number;
+  choreBonusSec: number;
+  autoChores: number;
+  prepShield: number;
 }
 
 export interface DayStats {
@@ -116,8 +120,10 @@ class GameStateClass {
   }
 
   /** Draws n distinct perks, weighted by rarity (rarityBoost favours rarer cards). */
-  rollPerks(n: number, rarityBoost = 1): PerkDef[] {
-    const pool = shuffle(PERKS.filter((p) => this.canTake(p)));
+  rollPerks(n: number, rarityBoost = 1, stage: "combat" | "chore" = "combat"): PerkDef[] {
+    let pool = shuffle(PERKS.filter((p) => this.canTake(p) && (stage === "chore") === (p.stage === "chore")));
+    // Every chore upgrade maxed out: fall back to the combat pool rather than an empty reward.
+    if (stage === "chore" && !pool.length) pool = shuffle(PERKS.filter((p) => this.canTake(p) && p.stage !== "chore"));
     const out: PerkDef[] = [];
     while (out.length < n && pool.length) {
       const weights = pool.map((p) => {
@@ -182,7 +188,11 @@ class GameStateClass {
       laserDrainMult: Math.pow(0.7, s("laser")),
       nuke: s("nuke") > 0,
       hazardMult: 1 + s("hazard") * 0.6,
-      electric: s("electric") > 0
+      electric: s("electric") > 0,
+      sabotageMult: Math.pow(0.6, s("saboteur")) * Math.pow(0.65, s("delegation")),
+      choreBonusSec: s("overtime") * 2,
+      autoChores: s("autocomplete"),
+      prepShield: s("prepared")
     };
   }
 }

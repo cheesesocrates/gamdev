@@ -10,6 +10,8 @@ export interface PerkDef {
   icon: string; // file in public/assets/icons
   /** Only show up as end-of-day rewards (never in the shop). */
   freeOnly?: boolean;
+  /** Chore-stage upgrades: only ever offered as the free end-of-day reward, never in the shop. */
+  stage?: "chore";
 }
 
 export const RARITY_COLOR: Record<Rarity, string> = {
@@ -31,8 +33,8 @@ export const PERKS: PerkDef[] = [
   { id: "dodge", name: "Agile Methodology", desc: "-25% dodge cooldown. Second stack adds a dodge charge.", rarity: "common", cost: 10, max: 3, icon: "arrow_rotate" },
   { id: "size", name: "Supersize Me", desc: "Shots are 40% bigger and knock enemies back harder.", rarity: "common", cost: 8, max: 2, icon: "larger" },
   { id: "velocity", name: "Express Shipping", desc: "+35% shot speed and range.", rarity: "common", cost: 7, max: 2, icon: "zoomIn" },
-  { id: "delegation", name: "Delegation", desc: "Chores and sabotage take 35% less time.", rarity: "common", cost: 8, max: 2, icon: "wrench" },
-  { id: "hazard", name: "Hazard Pay", desc: "Puddles, fire and explosions hit 60% harder. Slips last longer.", rarity: "common", cost: 8, max: 2, icon: "warning" },
+  { id: "delegation", name: "Delegation", desc: "Chore mini-games are ~35% shorter, sabotage is 35% faster.", rarity: "common", cost: 8, max: 2, icon: "wrench", stage: "chore" },
+  { id: "hazard", name: "Hazard Pay", desc: "Puddles, fire and explosions hit 60% harder. Slips last longer.", rarity: "common", cost: 8, max: 2, icon: "warning", stage: "chore" },
 
   // ---------------------------------------------------------------- rare
   { id: "multishot", name: "Copy-Paste", desc: "+1 projectile per shot.", rarity: "rare", cost: 20, max: 3, icon: "card" },
@@ -46,8 +48,8 @@ export const PERKS: PerkDef[] = [
   { id: "paper", name: "Paper Trail", desc: "Dodging scatters flammable shredded paper.", rarity: "rare", cost: 12, max: 1, icon: "notepad" },
   { id: "coldbrew", name: "Cold Brew", desc: "Coffee slows enemies 45%. Kills refill a cup.", rarity: "rare", cost: 14, max: 1, icon: "flask_half" },
   { id: "laser", name: "Laser Focus", desc: "+50% laser damage, -30% battery drain.", rarity: "rare", cost: 16, max: 2, icon: "power" },
-  { id: "electric", name: "Electric Personality", desc: "Every puddle is live. You are immune to shocks.", rarity: "rare", cost: 16, max: 1, icon: "signal3" },
-  { id: "flex", name: "Flex Hours", desc: "+15 seconds on every Crunch Time.", rarity: "rare", cost: 14, max: 2, icon: "timer_CW_75" },
+  { id: "electric", name: "Electric Personality", desc: "Every puddle you make is live (you were always immune).", rarity: "rare", cost: 16, max: 1, icon: "signal3", stage: "chore" },
+  { id: "flex", name: "Flex Hours", desc: "+15 seconds on every Crunch Time.", rarity: "rare", cost: 14, max: 2, icon: "timer_CW_75", stage: "chore" },
 
   // ---------------------------------------------------------------- epic
   { id: "explode", name: "Disruptive Innovation", desc: "Shots explode on impact.", rarity: "epic", cost: 30, max: 2, icon: "exploding" },
@@ -57,6 +59,12 @@ export const PERKS: PerkDef[] = [
   { id: "orbit", name: "Desk Toys", desc: "Newton's cradle balls orbit you and shred enemies.", rarity: "epic", cost: 26, max: 3, icon: "spinner" },
   { id: "interns", name: "Unpaid Interns", desc: "Every 8 kills, recruit an intern who fights for you.", rarity: "epic", cost: 26, max: 2, icon: "pawns" },
   { id: "scorched", name: "Burnout Culture", desc: "Your dodge leaves a trail of fire.", rarity: "epic", cost: 24, max: 1, icon: "campfire" },
+
+  // ---------------------------------------------------------------- chore-stage (free end-of-day rewards only)
+  { id: "autocomplete", name: "Out of Office", desc: "One chore a day completes itself the moment the day starts.", rarity: "rare", cost: 0, max: 2, icon: "timer_CW_75", stage: "chore" },
+  { id: "overtime", name: "Overtime Pay", desc: "Every finished chore banks +2 extra overtime seconds.", rarity: "common", cost: 0, max: 3, icon: "dollar", stage: "chore" },
+  { id: "saboteur", name: "Disgruntled Employee", desc: "Sabotage and scavenging take 40% less time.", rarity: "common", cost: 0, max: 2, icon: "wrench", stage: "chore" },
+  { id: "prepared", name: "Come Prepared", desc: "Start every Downsizing with a shield heart.", rarity: "rare", cost: 0, max: 3, icon: "shield", stage: "chore" },
 
   // ---------------------------------------------------------------- legendary
   { id: "parachute", name: "Golden Parachute", desc: "Revive once with full health when fired.", rarity: "legendary", cost: 40, max: 1, icon: "crown_a" },

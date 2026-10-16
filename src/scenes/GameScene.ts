@@ -20,6 +20,7 @@ import { COMBO_WORDS, FIRED_WORDS, PHASE1_TIPS } from "../data/lines";
 import { PerkDef } from "../data/perks";
 import { FLOOR_INDEX, WALL_INDEX } from "./BootScene";
 import { ArrowMark, UI } from "../ui/UI";
+import { MiniHandle, MiniKind, MINI_KINDS, openMini } from "../ui/Minigames";
 import { chance, clamp, damp, formatClock, lerp, pick, rand, shuffle, weightedPick } from "../util/math";
 
 export type Phase = "title" | "crunch" | "review" | "announce" | "downsizing" | "dayclear" | "results" | "gameover";
@@ -39,6 +40,8 @@ interface HitInfo {
 
 const BEST_KEY = "hostile-takeover-best";
 const PLAYER_SOURCES = new Set(["staple", "coffee", "shard", "laser", "orbit", "explosion", "ally", "chain", "nuke", "chair"]);
+
+const KIND_TAG: Record<MiniKind, string> = { timing: "timing", mash: "mash", whack: "whack", type: "typing", sequence: "memory", numbers: "numbers", track: "tracking" };
 
 export class GameScene extends Phaser.Scene {
   map!: OfficeMap;
@@ -66,6 +69,10 @@ export class GameScene extends Phaser.Scene {
   crunchLeft = 120;
   crunchTotal = 120;
   choresDone = new Set<ChoreId>();
+  /** The mini-game each chore uses today (re-rolled every day so tasks never feel the same). */
+  choreKinds: Partial<Record<ChoreId, MiniKind>> = {};
+  private lastKinds: Partial<Record<ChoreId, MiniKind>> = {};
+  mini: MiniHandle | null = null;
   dayDamageBuff = 1;
   godMode = false;
   paused = false;
@@ -257,7 +264,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private resetWorldForDay(day: number) {
-    this.dayCfg = dayConfig(day);
+    this.dayCfg = dayConfig(day, day > 1 ? this.dayCfg.chores : undefined);
     for (const e of this.enemies) e.destroy();
     this.enemies = [];
     this.projectiles.clear();
@@ -310,6 +317,7 @@ export class GameScene extends Phaser.Scene {
     this.resetWorldForDay(day);
     this.ui.initMinimap(this.map, this.world);
     this.spawnNpcs(this.dayCfg.npcs);
+    this.rollChoreKinds();
     this.crunchTotal = GameState.crunchSeconds();
     this.crunchLeft = this.crunchTotal;
     this.quota = this.dayCfg.quota;
@@ -320,7 +328,10 @@ export class GameScene extends Phaser.Scene {
     this.ui.setHudMode("crunch");
     this.audio.setMusic("lobby");
     this.audio.setMusicRate(1);
-    this.ui.banner(`DAY ${day}`, "3:00 PM · Finish your chores before 5", "#ffffff", 2.6);
+    const g = this.dayCfg.growth;
+    const sub = g === "more" ? "More chores on the list today" : g === "longer" ? "Same chores, but every task runs longer" : "Finish your chores before 5";
+    this.ui.banner(`DAY ${day}`, `3:00 PM · ${sub}`, g ? "#ffcf3f" : "#ffffff", 2.6);
+    this.time.delayedCall(300, () => this.autoCompleteChores());
     this.time.delayedCall(2600, () => {
       if (this.phase === "crunch") this.ui.toast(day === 1 ? PHASE1_TIPS[0] : pick(PHASE1_TIPS), "#4fd1ff", 5);
     });
@@ -345,8 +356,13 @@ export class GameScene extends Phaser.Scene {
 
   // ================================================================ crunch time
   private updateCrunch(dt: number, inp: PlayerInput) {
-    this.player.update(dt, inp);
-    this.handleInteraction(dt);
+    if (this.mini) {
+      // Hands on the task: the boss stands still while the clock keeps ticking.
+      this.player.update(dt, { ...inp, mx: 0, my: 0, fire: false, dodge: false, reload: false, switchTo: null, cycle: 0 });
+    } else {
+      this.player.update(dt, inp);
+      this.handleInteraction(dt);
+    }
     this.crunchLeft -= dt;
     const left = this.crunchLeft;
     if (left <= 20 && !this.hurryVoiced) {
@@ -371,6 +387,52 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (left <= 0) this.endCrunch(false);
+  }
+
+  /** Gives every chore a mini-game, never the one it had yesterday, spread across the day's chores. */
+  private rollChoreKinds() {
+    const bag: MiniKind[] = [];
+    const next: Partial<Record<ChoreId, MiniKind>> = {};
+    for (const c of this.dayCfg.chores) {
+      if (!bag.length) bag.push(...shuffle([...MINI_KINDS]));
+      let i = bag.findIndex((k) => k !== this.lastKinds[c]);
+      if (i < 0) i = 0;
+      next[c] = bag.splice(i, 1)[0];
+    }
+    this.choreKinds = next;
+    this.lastKinds = { ...this.lastKinds, ...next };
+  }
+
+  /** "Out of Office" upgrade: some chores do themselves. */
+  private autoCompleteChores() {
+    let n = GameState.stats.autoChores;
+    for (const c of shuffle([...this.dayCfg.chores])) {
+      if (n <= 0) break;
+      if (this.choresDone.has(c)) continue;
+      n--;
+      this.ui.toast(`Out of Office: ${CHORE_INFO[c].label} handled itself`, "#52d17c", 3);
+      this.completeChore(c);
+      if (c === "coffee") { this.stations.coffeeFixed = true; GameState.unlocked.coffee = true; }
+    }
+  }
+
+  startMini(chore: ChoreId, onDone: () => void) {
+    if (this.mini || this.phase !== "crunch") return;
+    const kind = this.choreKinds[chore] ?? pick(MINI_KINDS);
+    const len = Math.max(0.5, (1 + this.dayCfg.lengthLevel * 0.35) * (0.6 + 0.4 * GameState.stats.interactMult));
+    this.interactProgress = 0;
+    this.ui.setPrompt(null);
+    this.mini = openMini(this.ui.root, {
+      kind, chore, title: CHORE_INFO[chore].label, len,
+      sfx: (n) => {
+        if (n === "good") this.audio.play("confirm", { vol: 0.35, jitter: 0.1 });
+        else if (n === "bad") this.audio.play("soft_heavy", { vol: 0.4 });
+        else if (n === "win") this.audio.play("powerup", { vol: 0.4 });
+        else this.audio.play("click", { vol: 0.25, minGap: 60 });
+      },
+      onDone: () => { this.mini = null; onDone(); },
+      onCancel: () => { this.mini = null; this.pressed.clear(); }
+    });
   }
 
   allChoresDone() {
@@ -402,7 +464,9 @@ export class GameScene extends Phaser.Scene {
 
   private endCrunch(early: boolean) {
     const leftover = early ? Math.floor(Math.max(0, this.crunchLeft)) : 0;
-    const choreBonus = this.choresDone.size * 3;
+    this.mini?.close();
+    this.mini = null;
+    const choreBonus = this.choresDone.size * (3 + GameState.stats.choreBonusSec);
     const missed = this.dayCfg.chores.filter((c) => !this.choresDone.has(c));
     GameState.bank += leftover + choreBonus;
     GameState.dayStats.banked = leftover + choreBonus;
@@ -422,12 +486,17 @@ export class GameScene extends Phaser.Scene {
     this.ui.setHudMode("none");
     this.audio.setMusic("review");
     this.audio.setMusicRate(1);
-    this.reviewOffers = GameState.rollPerks(5).map((perk) => ({ perk, sold: false }));
+    this.reviewOffers = this.rollShop();
     this.renderReview();
   }
 
+  /** Upgrades are scarce on purpose: four offers at a markup, so a good day buys one, a great day two. */
+  private rollShop() {
+    return GameState.rollPerks(4).map((perk) => ({ perk: { ...perk, cost: Math.ceil(perk.cost * 1.5) }, sold: false }));
+  }
+
   private renderReview() {
-    const healCost = 8, rerollCost = 5;
+    const healCost = 10, rerollCost = 7;
     this.ui.showReview({
       bank: GameState.bank,
       notes: this.reviewNotes,
@@ -455,7 +524,7 @@ export class GameScene extends Phaser.Scene {
       reroll: () => {
         if (GameState.bank < rerollCost) return;
         GameState.bank -= rerollCost;
-        this.reviewOffers = GameState.rollPerks(5).map((perk) => ({ perk, sold: false }));
+        this.reviewOffers = this.rollShop();
         this.audio.play("select", { vol: 0.5 });
         this.renderReview();
       },
@@ -517,10 +586,18 @@ export class GameScene extends Phaser.Scene {
     this.player.setArmed(true);
     this.player.refill();
     for (const e of this.enemies) if (e.mode === "npc") e.turnHostile();
+    // Some coworkers stay put in their own rooms and ambush you when you wander in.
+    const lurkers = shuffle(this.enemies.filter((e) => e.hostile && !e.def.boss && Math.hypot(e.x - this.player.x, e.y - this.player.y) > 560));
+    for (const e of lurkers.slice(0, Math.min(7, 2 + Math.floor(GameState.day / 2)))) {
+      e.lurking = true;
+      e.lurkLeft = rand(30, 55);
+    }
     this.waves.reset();
     this.hazards.setAllElectric(GameState.stats.electric);
+    if (GameState.stats.prepShield) this.player.tempHp = Math.max(this.player.tempHp, GameState.stats.prepShield * 2);
     this.audio.setMusic("fight", 0.2);
     this.audio.voice("fight", 1);
+    this.ui.setDusk(0);
     this.ui.setHudMode("fight");
     this.ui.flash("#ff2040", 260, 0.5);
     this.ui.banner("FIGHT!", `Fire ${this.quota} coworkers before they fire you`, "#ff3b55", 1.8);
@@ -597,7 +674,7 @@ export class GameScene extends Phaser.Scene {
     const title = { S: "Exceeds all expectations. Promoted to Senior VP of Firing.", A: "Exceeds expectations.", B: "Meets expectations.", C: "Needs improvement.", D: "On a performance improvement plan." }[grade]!;
     const acc = ds.shots ? Math.round((ds.hits / Math.max(1, ds.shots)) * 100) : 0;
     this.audio.setMusic("review");
-    const picks = GameState.rollPerks(3, 2.2);
+    const picks = GameState.rollPerks(3, 2.2, "chore");
     this.ui.showResults({
       day: GameState.day, grade, gradeColor, title,
       stats: [
@@ -896,6 +973,13 @@ export class GameScene extends Phaser.Scene {
       const d = Math.hypot(e.x - p.x, e.y - p.y);
       if (d < 560) this.hitEnemy(e, 70 * GameState.stats.dmgMult, { angle: Math.atan2(e.y - p.y, e.x - p.x), kind: "nuke", x: e.x, y: e.y, knock: 520 });
     }
+  }
+
+  /** A hazard the player set up finished off a coworker: pay out a little overtime so prep feels worth it. */
+  trapKill(x: number, y: number) {
+    if (this.phase !== "downsizing") return;
+    GameState.bank += 1;
+    this.fx.text(x, y - 44, "TRAP KILL +1s", { color: "#7dffb0", size: 14, dur: 0.9 });
   }
 
   explosion(x: number, y: number, radius: number, dmg: number, opts: { friendly: boolean; small?: boolean; skip?: Enemy; fromCopier?: boolean }) {
@@ -1276,7 +1360,8 @@ export class GameScene extends Phaser.Scene {
     this.ui.setBag(p.shredBag, p.dropPaper);
     if (this.phase === "crunch") {
       this.ui.setClock(formatClock(Math.max(0, this.crunchLeft), this.crunchTotal), Math.max(0, this.crunchLeft), this.crunchLeft < 20);
-      const items = this.dayCfg.chores.map((c) => ({ label: CHORE_INFO[c].label, room: CHORE_INFO[c].room, done: this.choresDone.has(c) }));
+      const items = this.dayCfg.chores.map((c) => ({ label: CHORE_INFO[c].label, room: CHORE_INFO[c].room, done: this.choresDone.has(c), tag: this.choreKinds[c] ? KIND_TAG[this.choreKinds[c]!] : undefined }));
+      this.ui.setDusk(1 - Math.max(0, this.crunchLeft) / this.crunchTotal);
       const opt: string[] = [];
       if (!GameState.unlocked.coffee && !this.dayCfg.chores.includes("coffee")) opt.push("Fix the coffee machine to unlock Hot Coffee");
       if (!GameState.unlocked.laser && !this.dayCfg.chores.includes("presentation")) opt.push("Optional: prep the board deck (Conference Room) to unlock the Laser Pointer");

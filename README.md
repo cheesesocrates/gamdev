@@ -20,15 +20,19 @@ works from any folder.
 
 ## How a day works
 
-1. **Crunch Time (120 s):** a clock ticks from 3:00 to 5:00 PM. Do the chores on your sticky note (hold **E**).
+1. **Crunch Time (120 s):** a clock ticks from 3:00 to 5:00 PM. Do the chores on your sticky note: hold **E** on a glowing
+   object to open a quick Among-Us-style task (timing bar, button mash, whack-the-emails, typing, memory pattern,
+   number order, cursor tracking). Which chores you get, and which task each uses, is re-rolled every day. Chores get
+   harder by alternating: one day adds a chore, the next makes every task longer.
    Spend spare seconds on sabotage: kick water coolers, overload power strips, overheat copiers, lay shredded-paper
    trails, barricade doorways. Finish early and press **ENTER** to bank the leftover time. Missed chores add to
    the day's firing quota.
-2. **Performance Review:** spend banked seconds on upgrades. Unspent time carries over.
+2. **Performance Review:** spend banked seconds on (pricey) combat upgrades. Unspent time carries over. Traps you
+   set during Crunch Time pay +1s overtime whenever they finish off a coworker.
 3. **5:00 PM:** *"BUDGET CUTS HAVE BEEN MADE. DOWNSIZING HAS BEGUN."* Coworkers turn hostile, and more pour out
    of the elevators, stairwells and fire exit.
-4. **The Downsizing:** fire the quota (10 on day 1, +4 per day) before they fire you. Clear it to pick a free
-   upgrade, then do it all again tomorrow, with more enemies, new enemy types and, every 5th day, a boss.
+4. **The Downsizing:** fire the quota (10 on day 1, +4 per day) before they fire you. Clear it to pick one free
+   chore-stage upgrade (the only place those appear), then do it all again tomorrow, with more enemies, new enemy types and, every 5th day, a boss.
 
 ### Controls
 | | |

@@ -175,8 +175,7 @@ export class Player {
       let mx = inp.mx, my = inp.my;
       const len = Math.hypot(mx, my);
       if (len > 0) { mx /= len; my /= len; }
-      const onWater = g.hazards.isWater(this.x, this.y);
-      const accel = onWater ? 2.2 : 18;
+      const accel = 18;
       this.vx += (mx * speed - this.vx) * Math.min(1, accel * dt);
       this.vy += (my * speed - this.vy) * Math.min(1, accel * dt);
       if (len > 0) {
@@ -244,22 +243,8 @@ export class Player {
   private environment(dt: number) {
     const g = this.g;
     const st = GameState.stats;
-    if (g.phase !== "downsizing") return;
-    if (this.rolling > 0) return;
-    if (g.hazards.isElectric(this.x, this.y) && !st.electric && this.shockCd <= 0) {
-      this.shockCd = 1.1;
-      g.fx.burst("zap", this.x, this.y, 8);
-      g.audio.play("zap", { vol: 0.5 });
-      if (this.damage(1, this.x, this.y, "zap")) return;
-      this.stun = Math.max(this.stun, 0.35);
-    }
-    if (g.hazards.isFire(this.x, this.y)) {
-      this.burnTick -= dt;
-      if (this.burnTick <= 0) {
-        this.burnTick = 0.8;
-        this.damage(1, this.x, this.y, "fire");
-      }
-    } else this.burnTick = 0;
+    // Traps are for coworkers: puddles, sparks and flames never hurt (or slow) the boss.
+    void dt; void st; void g;
   }
 
   /** Returns true if this hit was fatal. */

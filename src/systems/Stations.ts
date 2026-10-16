@@ -127,7 +127,7 @@ export class Stations {
   actionFor(s: Station): Action | null {
     const g = this.g;
     const phase = g.phase;
-    const im = GameState.stats.interactMult;
+    const im = GameState.stats.sabotageMult;
     const chore = choreForStation(s.def);
     const required = chore ? g.dayCfg.chores.includes(chore) : false;
     const choreDone = chore ? g.choresDone.has(chore) : true;
@@ -196,16 +196,16 @@ export class Stations {
     return null;
   }
 
-  private choreAction(chore: ChoreId, im: number, extra?: () => void): Action {
+  private choreAction(chore: ChoreId, _im: number, extra?: () => void): Action {
     return {
       label: CHORE_INFO[chore].label,
-      hold: CHORE_INFO[chore].hold * im,
+      hold: 0.3,
       kind: "chore",
-      run: () => {
+      run: () => this.g.startMini(chore, () => {
         extra?.();
         this.g.completeChore(chore);
         if (chore === "coffee") this.fixCoffee();
-      }
+      })
     };
   }
 
@@ -403,7 +403,7 @@ export class Stations {
     s.wrecked = true;
     s.hot = false;
     s.furn?.sprite.setTint?.(0x4a4a4a);
-    g.explosion(s.x, s.y, 190, 95, { friendly: false, fromCopier: true });
+    g.explosion(s.x, s.y, 190, 95, { friendly: true, fromCopier: true });
     g.hazards.paperPatch(s.x, s.y, 2);
     g.hazards.igniteRadius(s.x, s.y, 170, 1.6);
     if (chance(0.5)) g.audio.voice("war_fire_in_the_hole", 0.6);

@@ -95,6 +95,10 @@ export class Enemy {
     if (this.def.shield && mode !== "npc") this.addShield();
   }
 
+  /** Ambusher: stands in its room waiting until the boss wanders close (or it gets bored). */
+  lurking = false;
+  lurkLeft = 0;
+
   get hostile() { return this.mode === "hostile"; }
   get ally() { return this.mode === "ally"; }
 
@@ -109,6 +113,22 @@ export class Enemy {
     this.path = [];
     this.spawnGrace = rand(0.3, 1.0);
     if (this.def.shield && !this.shield) this.addShield();
+  }
+
+  wake() {
+    if (!this.lurking) return;
+    this.lurking = false;
+    this.spawnGrace = rand(0.2, 0.6);
+    if (this.g.canBark()) this.say(pick(["Found you!", "Gotcha, boss.", "Nothing personal.", "Is it five already?"]), 1.6);
+  }
+
+  private updateLurk(dt: number) {
+    const g = this.g;
+    this.vx *= Math.pow(0.001, dt);
+    this.vy *= Math.pow(0.001, dt);
+    this.lurkLeft -= dt;
+    const d = Math.hypot(g.player.x - this.x, g.player.y - this.y);
+    if (d < 340 || this.lurkLeft <= 0) this.wake();
   }
 
   makeAlly(life: number) {
@@ -144,6 +164,7 @@ export class Enemy {
     this.vx += Math.cos(angle) * kb;
     this.vy += Math.sin(angle) * kb;
     if (this.mode === "npc") this.turnHostile();
+    this.wake();
     return this.hp <= 0;
   }
 
@@ -166,7 +187,7 @@ export class Enemy {
       this.fireTickCd -= dt;
       if (this.fireTickCd <= 0) {
         this.fireTickCd = 0.25;
-        if (g.hitEnemy(this, this.burnDps * 0.25, { angle: 0, kind: "fire", x: this.x, y: this.y, knock: 0, silent: true })) return;
+        if (g.hitEnemy(this, this.burnDps * 0.25, { angle: 0, kind: "fire", x: this.x, y: this.y, knock: 0, silent: true })) { g.trapKill(this.x, this.y); return; }
         g.fx.burst("fire", this.x + rand(-8, 8), this.y + rand(-8, 8), 1);
         // Burning coworkers ignite the paper they run through.
         g.hazards.igniteAt(this.x, this.y);
@@ -175,6 +196,7 @@ export class Enemy {
 
     if (this.mode === "npc") this.updateNpc(dt);
     else if (this.mode === "ally") this.updateAlly(dt);
+    else if (this.lurking) this.updateLurk(dt);
     else this.updateHostile(dt);
 
     if (this.dead) return;
@@ -529,26 +551,26 @@ export class Enemy {
     const hm = GameState.stats.hazardMult;
     if (hz.isElectric(this.x, this.y) && this.shockCd <= 0) {
       this.shockCd = 0.9;
-      this.stun = Math.max(this.stun, 0.9);
+      this.stun = Math.max(this.stun, 1.4);
       g.fx.burst("zap", this.x, this.y, 10);
       g.fx.light(this.x, this.y, 0x6fd8ff, 1.4, 0.15);
       g.audio.play("zap", { vol: 0.35, minGap: 70 });
-      if (g.hitEnemy(this, 22 * hm, { angle: 0, kind: "zap", x: this.x, y: this.y, knock: 0 })) return;
+      if (g.hitEnemy(this, 40 * hm, { angle: 0, kind: "zap", x: this.x, y: this.y, knock: 0 })) { g.trapKill(this.x, this.y); return; }
     } else if (hz.isWater(this.x, this.y) && this.slipCd <= 0 && this.slip <= 0 && !this.def.boss) {
       const sp = Math.hypot(this.vx, this.vy);
       if (sp > 60) {
-        this.slip = 0.75 * (GameState.stats.hazardMult > 1 ? 1.5 : 1);
+        this.slip = 1.0 * (GameState.stats.hazardMult > 1 ? 1.5 : 1);
         this.slipCd = 2.6;
         this.vx *= 1.7; this.vy *= 1.7;
         g.fx.burst("water", this.x, this.y, 8);
         g.audio.play("splash", { vol: 0.3, minGap: 90 });
         if (chance(0.3)) g.fx.text(this.x, this.y - 30, "SLIP!", { color: "#9fd8ff", size: 14, dur: 0.6 });
-        if (hm > 1 && g.hitEnemy(this, 8 * hm, { angle: 0, kind: "slip", x: this.x, y: this.y, knock: 0, silent: true })) return;
+        if (g.hitEnemy(this, 14 * hm, { angle: 0, kind: "slip", x: this.x, y: this.y, knock: 0, silent: true })) { g.trapKill(this.x, this.y); return; }
       }
     }
     if (hz.isFire(this.x, this.y)) {
       this.burn = Math.max(this.burn, 2.0);
-      this.burnDps = Math.max(this.burnDps, 26 * hm);
+      this.burnDps = Math.max(this.burnDps, 42 * hm);
     }
     if (this.def.burnout && this.mode === "hostile") {
       // Burnt-out employees smoulder and set paper alight around them.

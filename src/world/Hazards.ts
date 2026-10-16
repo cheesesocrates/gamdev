@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { DEPTH, TILE } from "../config";
+import { DEPTH, TILE, WORLD_H, WORLD_W } from "../config";
 import { World } from "./World";
 import { Effects } from "../systems/Effects";
 import { AudioManager } from "../systems/Audio";
@@ -21,8 +21,14 @@ export class Hazards {
   paper: Uint8Array;
   fire: Float32Array;
   electric: Uint8Array;
-  private waterImg = new Map<number, Phaser.GameObjects.Image>();
-  private paperImg = new Map<number, Phaser.GameObjects.Image>();
+  /** Every puddle tile is painted into one merged, semi-transparent layer so neighbours melt into a single pool. */
+  private waterTiles = new Set<number>();
+  private waterRT: Phaser.GameObjects.RenderTexture;
+  private waterG: Phaser.GameObjects.Graphics;
+  private shineG: Phaser.GameObjects.Graphics;
+  private waterDirty = false;
+  private waterCd = 0;
+  private paperImg = new Map<number, Phaser.GameObjects.Image[]>();
   private sparks = new Set<number>();
   private pendingWater: { i: number; t: number }[] = [];
   private electricDirty = false;
@@ -44,6 +50,58 @@ export class Hazards {
     this.paper = new Uint8Array(n);
     this.fire = new Float32Array(n);
     this.electric = new Uint8Array(n);
+    this.waterRT = scene.add.renderTexture(0, 0, WORLD_W, WORLD_H).setOrigin(0, 0).setDepth(DEPTH.HAZARD).setAlpha(0.78);
+    this.waterG = scene.make.graphics({}, false);
+    this.shineG = scene.add.graphics().setDepth(DEPTH.HAZARD + 0.5);
+  }
+
+  private hash(i: number) {
+    const v = Math.sin(i * 12.9898) * 43758.5453;
+    return v - Math.floor(v);
+  }
+  private puddleCenter(i: number) {
+    const tx = i % this.w, ty = Math.floor(i / this.w);
+    return { x: (tx + 0.5) * TILE + (this.hash(i) - 0.5) * 9, y: (ty + 0.5) * TILE + (this.hash(i * 1.7 + 3) - 0.5) * 9, r: 28 + this.hash(i * 2.3 + 1) * 6 };
+  }
+
+  private paintWater() {
+    const g = this.waterG;
+    g.clear();
+    const pass = (extra: number, color: (i: number) => number) => {
+      for (const i of this.waterTiles) {
+        const a = this.puddleCenter(i);
+        const r = a.r + extra;
+        g.fillStyle(color(i), 1);
+        g.fillCircle(a.x, a.y, r);
+        const tx = i % this.w, ty = Math.floor(i / this.w);
+        if (tx < this.w - 1 && this.waterTiles.has(i + 1)) {
+          const b = this.puddleCenter(i + 1), h = Math.min(a.r, b.r) * 2 + extra * 2;
+          g.fillRect(Math.min(a.x, b.x), (a.y + b.y) / 2 - h / 2, Math.abs(b.x - a.x), h);
+        }
+        if (tx < this.w - 1 && ty < this.h - 1 && this.waterTiles.has(i + 1) && this.waterTiles.has(i + this.w) && this.waterTiles.has(i + this.w + 1)) {
+          // Fill the hole where four puddle tiles meet.
+          const q = [a, this.puddleCenter(i + 1), this.puddleCenter(i + this.w + 1), this.puddleCenter(i + this.w)];
+          g.fillPoints(q.map((c) => new Phaser.Math.Vector2(c.x, c.y)), true);
+        }
+        if (ty < this.h - 1 && this.waterTiles.has(i + this.w)) {
+          const b = this.puddleCenter(i + this.w), h = Math.min(a.r, b.r) * 2 + extra * 2;
+          g.fillRect((a.x + b.x) / 2 - h / 2, Math.min(a.y, b.y), h, Math.abs(b.y - a.y));
+        }
+      }
+    };
+    pass(4, (i) => (this.electric[i] ? 0x39a8d0 : 0x2b6f9e)); // wet rim
+    pass(0, (i) => (this.electric[i] ? 0x8fe8ff : 0x4aa6dd)); // body
+    pass(-9, (i) => (this.electric[i] ? 0xd2fbff : 0x72c4f2)); // calm centre
+    this.waterRT.clear();
+    this.waterRT.draw(g);
+    const s = this.shineG;
+    s.clear();
+    for (const i of this.waterTiles) {
+      if (this.hash(i * 3.1 + 7) < 0.45) continue;
+      const a = this.puddleCenter(i);
+      s.lineStyle(3, 0xffffff, 0.6).beginPath().arc(a.x - 6, a.y - 6, 13, 3.5, 4.6).strokePath();
+      s.fillStyle(0xffffff, 0.7).fillCircle(a.x + 9, a.y + 8, 2);
+    }
   }
 
   idx(x: number, y: number) {
@@ -65,11 +123,8 @@ export class Hazards {
     if (i < 0 || this.water[i] || !this.floorTile(i)) return;
     this.water[i] = 1;
     if (this.fire[i] > 0) this.extinguish(i);
-    const x = (i % this.w + 0.5) * TILE, y = (Math.floor(i / this.w) + 0.5) * TILE;
-    const img = this.scene.add.image(x, y, "h_water").setDepth(DEPTH.HAZARD).setAlpha(0);
-    img.setRotation(Math.floor(Math.random() * 4) * Math.PI / 2);
-    this.scene.tweens.add({ targets: img, alpha: 1, duration: 260 });
-    this.waterImg.set(i, img);
+    this.waterTiles.add(i);
+    this.waterDirty = true;
     this.electricDirty = true;
   }
 
@@ -103,9 +158,15 @@ export class Hazards {
     if (i < 0 || this.paper[i] || this.water[i] || !this.floorTile(i)) return false;
     this.paper[i] = 1;
     const x = (i % this.w + 0.5) * TILE, y = (Math.floor(i / this.w) + 0.5) * TILE;
-    const img = this.scene.add.image(x + rand(-4, 4), y + rand(-4, 4), "h_paper").setDepth(DEPTH.HAZARD + 1);
-    img.setRotation(Math.floor(Math.random() * 4) * Math.PI / 2);
-    this.paperImg.set(i, img);
+    const sheets: Phaser.GameObjects.Image[] = [];
+    const n = 5 + Math.floor(Math.random() * 3);
+    for (let k = 0; k < n; k++) {
+      const img = this.scene.add.image(x + rand(-26, 26), y + rand(-26, 26), Math.random() < 0.3 ? "h_sheet2" : "h_sheet")
+        .setDepth(DEPTH.HAZARD + 1 + k * 0.01).setRotation(rand(0, Math.PI * 2)).setScale(rand(0.8, 1.15));
+      if (Math.random() < 0.3) img.setTint(0xe8e0c4);
+      sheets.push(img);
+    }
+    this.paperImg.set(i, sheets);
     return true;
   }
 
@@ -198,9 +259,7 @@ export class Hazards {
         }
       }
     }
-    for (const [i, img] of this.waterImg) {
-      if (this.electric[i]) img.setTint(0x9ff0ff); else img.clearTint();
-    }
+    this.waterDirty = true;
   }
 
   update(dt: number) {
@@ -220,6 +279,13 @@ export class Hazards {
       this.electricDirty = false;
       this.recomputeElectric();
     }
+    this.waterCd -= dt;
+    if (this.waterDirty && this.waterCd <= 0) {
+      this.waterDirty = false;
+      this.waterCd = 0.06;
+      this.paintWater();
+    }
+    this.shineG.setAlpha(0.55 + 0.45 * Math.sin(this.scene.time.now / 420));
 
     // Fire: burn down, spread along paper, emit flames.
     this.spreadTimer -= dt;
@@ -236,6 +302,8 @@ export class Hazards {
       const x = (i % this.w + 0.5) * TILE, y = (Math.floor(i / this.w) + 0.5) * TILE;
       if (doEmit) {
         this.fx.burst("fire", x + rand(-22, 22), y + rand(-18, 18), 1);
+        const sheets = this.paperImg.get(i);
+        if (sheets) for (const sh of sheets) sh.setTint(0xff8a3a);
         if (chance(0.3)) this.fx.burst("ember", x + rand(-20, 20), y + rand(-20, 20), 1);
       }
       if (doSpread && this.paper[i]) {
@@ -251,7 +319,7 @@ export class Hazards {
         this.fire[i] = 0;
         if (this.paper[i]) {
           this.paper[i] = 0;
-          this.paperImg.get(i)?.destroy();
+          this.paperImg.get(i)?.forEach((sh) => sh.destroy());
           this.paperImg.delete(i);
         }
         this.fx.decal(x + rand(-6, 6), y + rand(-6, 6), "fx_scorch_02", { scale: rand(0.16, 0.22), alpha: 0.55, tint: 0x111111 });
@@ -264,21 +332,21 @@ export class Hazards {
     this.zapTimer -= dt;
     if (this.zapTimer <= 0) {
       this.zapTimer = 0.12;
-      for (const [i] of this.waterImg) {
+      for (const i of this.waterTiles) {
         if (!this.electric[i] || !chance(0.12)) continue;
         const x = (i % this.w + 0.5) * TILE + rand(-24, 24), y = (Math.floor(i / this.w) + 0.5) * TILE + rand(-24, 24);
         this.fx.burst("zap", x, y, 2);
       }
-      for (const img of this.waterImg.values()) {
-        if (img.tintTopLeft === 0x9ff0ff) img.setAlpha(0.75 + Math.random() * 0.25);
-      }
+      if (this.waterTiles.size && this.electric.includes(1)) this.waterRT.setAlpha(0.7 + Math.random() * 0.25);
+      else this.waterRT.setAlpha(0.78);
     }
   }
 
   clear() {
-    for (const img of this.waterImg.values()) img.destroy();
-    for (const img of this.paperImg.values()) img.destroy();
-    this.waterImg.clear();
+    for (const sheets of this.paperImg.values()) sheets.forEach((sh) => sh.destroy());
+    this.waterTiles.clear();
+    this.waterRT.clear();
+    this.shineG.clear();
     this.paperImg.clear();
     this.water.fill(0);
     this.paper.fill(0);

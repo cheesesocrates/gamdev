@@ -411,6 +411,25 @@ function makeTextures(scene: Phaser.Scene) {
       ctx.restore();
     }
   });
+  // Loose sheets of shredded-office paper: flat page, and a crumpled ball-ish variant.
+  canvasTexture(scene, "h_sheet", 34, 28, (ctx) => {
+    ctx.fillStyle = "rgba(0,0,0,0.22)"; ctx.fillRect(5, 6, 24, 18);
+    ctx.fillStyle = "#f7f3e8"; ctx.fillRect(3, 3, 24, 18);
+    ctx.strokeStyle = "rgba(60,50,30,0.35)"; ctx.lineWidth = 1; ctx.strokeRect(3.5, 3.5, 23, 17);
+    ctx.fillStyle = "rgba(70,90,140,0.45)";
+    for (let y = 8; y < 19; y += 3) ctx.fillRect(6, y, 6 + Math.random() * 14, 1);
+  });
+  canvasTexture(scene, "h_sheet2", 30, 28, (ctx) => {
+    ctx.fillStyle = "rgba(0,0,0,0.22)";
+    ctx.beginPath(); ctx.ellipse(16, 17, 11, 8, 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ece6d4";
+    ctx.beginPath();
+    const pts = [[4, 10], [10, 3], [19, 5], [26, 11], [22, 19], [12, 22], [5, 17]];
+    pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "rgba(90,80,60,0.45)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(9, 6); ctx.lineTo(14, 13); ctx.lineTo(8, 18); ctx.moveTo(14, 13); ctx.lineTo(23, 12); ctx.stroke();
+  });
   canvasTexture(scene, "h_coffee", 56, 56, (ctx) => {
     ctx.fillStyle = "rgba(92,54,24,0.55)";
     ctx.beginPath();

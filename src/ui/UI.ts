@@ -56,6 +56,7 @@ export class UI {
     // Asset URLs in bundled CSS resolve against the CSS file, so set them here (document-relative).
     this.root.style.setProperty("--heart", iconUrl("suit_hearts"));
     this.root.innerHTML = `
+      <div id="dusk"></div>
       <div id="vignette"></div>
       <div id="hud" class="hidden">
         <div class="hud-tl">
@@ -171,10 +172,15 @@ export class UI {
     });
   }
 
-  setChores(items: { label: string; room: string; done: boolean }[], optional: string) {
+  /** Late-afternoon light: 0 = noon-ish, 1 = golden hour right before 5 PM. */
+  setDusk(frac: number) {
+    this.set("dusk", frac.toFixed(2), () => { ($("#dusk", this.root)).style.opacity = String(Math.max(0, Math.min(1, frac))); });
+  }
+
+  setChores(items: { label: string; room: string; done: boolean; tag?: string }[], optional: string) {
     this.set("chores", JSON.stringify(items) + optional, () => {
       $(".sticky ul", this.root).innerHTML = items.map((i) =>
-        `<li class="${i.done ? "done" : ""}"><span class="box"></span><span>${i.label}</span><span class="room">${i.room}</span></li>`).join("");
+        `<li class="${i.done ? "done" : ""}"><span class="box"></span><span>${i.label}${i.tag ? ` <em class="tag">${i.tag}</em>` : ""}</span><span class="room">${i.room}</span></li>`).join("");
       const opt = $(".sticky .opt", this.root);
       opt.innerHTML = optional;
       opt.classList.toggle("hidden", !optional);
@@ -483,7 +489,7 @@ export class UI {
           <div class="bankbox"><div class="grade" style="color:${d.gradeColor}">${d.grade}</div><div class="k">PERFORMANCE RATING</div></div>
         </div>
         <div class="stats-grid">${d.stats.map(([k, v]) => `<div class="stat"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("")}</div>
-        <div class="pick-title">END-OF-DAY BONUS: <span>PICK ONE, FREE</span></div>
+        <div class="pick-title">CHORE-STAGE UPGRADE: <span>PICK ONE, FREE (combat upgrades cost overtime)</span></div>
         <div class="cards">${picks.map((p, i) => this.cardHtml(p, stacks[p.id] ?? 0, false, true, i, false)).join("")}</div>
       </div>`);
     el.querySelectorAll<HTMLElement>(".card").forEach((c) => c.addEventListener("click", () => onPick(Number(c.dataset.i))));
