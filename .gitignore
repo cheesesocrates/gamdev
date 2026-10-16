@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.log
+
+# Kenney source bundle (huge) - only the curated assets in public/ and tools/models/ are tracked
+Kenney Game Assets All-in-1 3.7.0/
+Kenney Game Assets All-in-1 3.7.0.zip
+assets_src/
+*.tsbuildinfo
