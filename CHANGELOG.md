@@ -37,6 +37,13 @@ When a batch ships, the Unreleased lines move under a new version heading with t
   shove or a dodge-roll), and only the coworkers they're actually travelling into. A coworker walking into the side of
   a sliding desk, or a desk the Hatchet Man knocked loose, doesn't hurt anyone; a pot only throws shrapnel if you threw
   it. Office chairs follow the same rule: a chair a coworker bumped into no longer bowls coworkers over.
+- Fix (Gameplay): no coworker spawns inside the code-locked room any more. The Marketing Lounge has a fire exit, and
+  on days it was locked, coworkers came in through it and got stuck behind the door (you couldn't reach them, so the
+  quota could never be met). Locked-room spawn points are skipped, nobody sits or wanders in there before 5 PM, and
+  the Consultant's interns can't appear in there either. Safety net: a coworker with no way to reach you for a few
+  seconds comes back in through an entrance.
+- Fix: a coworker killed by a live puddle no longer keeps updating for the rest of that frame (it could leave a
+  stray flame sprite behind).
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.

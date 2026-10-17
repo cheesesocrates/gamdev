@@ -54,6 +54,13 @@ export class Vault {
   get doorX() { return this.room ? (this.room.tx + 1) * TILE : 0; }
   get doorY() { return this.room ? (this.room.ty + 0.5) * TILE : 0; }
 
+  /** The zone index of the room behind the door while it's still locked (-1 otherwise). Nobody spawns or phases in there. */
+  get lockedZone(): number {
+    if (!this.room || this.open) return -1;
+    const name = this.room.name;
+    return this.g.map.zones.findIndex((z) => z.name === name);
+  }
+
   /** New day: yesterday's door is left open, a new one locks with a new code. */
   setupDay(chores: ChoreId[]) {
     this.unlockTiles();

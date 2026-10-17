@@ -104,6 +104,9 @@ export class Enemy {
   private panicA = 0;
   allyLife = 0;
   spawnGrace = 0;
+  /** Seconds this coworker has had no way to reach the player (see GameScene.rescueStraggler). */
+  private unreachT = 0;
+  private reachCheck = rand(0, 0.5);
 
   // NPC wandering
   home: { x: number; y: number; facing: number } | null = null;
@@ -274,6 +277,8 @@ export class Enemy {
 
     if (this.dead) return;
     this.environment(dt);
+    // A live puddle can finish them off: their sprites are gone, so stop here.
+    if (this.dead) return;
 
     // Integrate + collide.
     const p = { x: this.x, y: this.y };
@@ -288,10 +293,16 @@ export class Enemy {
     else this.chargeBlocked = 0;
     // Safety valve: never leave a straggler wedged inside furniture (it would soft-lock the quota).
     if (this.stuckTimer > 3 && !g.world.walkableTile(Math.floor(this.x / TILE), Math.floor(this.y / TILE))) {
-      const free = g.world.nearestWalkable(this.x, this.y);
+      const free = g.safeSpot(this.x, this.y);
       this.x = free.x;
       this.y = free.y;
       this.stuckTimer = 0;
+    }
+    // ...or walled in somewhere with no way to the player at all: back in through an entrance after a few seconds.
+    if (this.mode === "hostile" && !this.lurking && !this.def.boss && g.phase === "downsizing" && (this.reachCheck -= dt) <= 0) {
+      this.reachCheck = 0.5;
+      this.unreachT = isFinite(g.reachDist(this.x, this.y)) ? 0 : this.unreachT + 0.5;
+      if (this.unreachT >= 4 && g.rescueStraggler(this)) this.unreachT = 0;
     }
 
     this.render(dt);
@@ -422,7 +433,7 @@ export class Enemy {
         g.audio.play("alert", { vol: 0.4 });
         for (let k = 0; k < 2 + Math.floor(g.dayCfg.day / 5); k++) {
           const a = rand(0, Math.PI * 2);
-          const p = g.world.nearestWalkable(this.x + Math.cos(a) * 70, this.y + Math.sin(a) * 70);
+          const p = g.safeSpot(this.x + Math.cos(a) * 70, this.y + Math.sin(a) * 70);
           const e = g.spawnEnemy("intern", p.x, p.y, "hostile");
           e.spawnGrace = 0.5;
           g.fx.burst("confetti", p.x, p.y, 8);
@@ -810,7 +821,7 @@ export class Enemy {
     }
     if (this.npcTimer <= 0) {
       if (this.npcState === "sit") {
-        const spot = pick(g.map.wanderSpots);
+        const spot = g.wanderSpot();
         this.goTo(spot.x + rand(-60, 60), spot.y + rand(-60, 60));
         this.npcState = "walk";
       } else if (this.home) {

@@ -478,11 +478,7 @@ export class GameScene extends Phaser.Scene {
 
   private spawnNpcs(n: number) {
     // Nobody sits in the code-locked room (they'd be stuck there at 5 PM).
-    const locked = this.vault.room ? this.map.zones.find((z) => z.name === this.vault.room!.name) : undefined;
-    const free = locked ? this.map.npcHomes.filter((h) => {
-      const tx = Math.floor(h.x / TILE), ty = Math.floor(h.y / TILE);
-      return tx < locked.x0 || tx > locked.x1 || ty < locked.y0 || ty > locked.y1;
-    }) : this.map.npcHomes;
+    const free = this.map.npcHomes.filter((h) => !this.inLockedRoom(h.x, h.y));
     const homes = shuffle([...free]).slice(0, n);
     const weights = Object.entries(this.dayCfg.weights)
       .filter(([t]) => !ENEMIES[t as EnemyType].boss)
@@ -814,7 +810,7 @@ export class GameScene extends Phaser.Scene {
     const stx = GameState.stats;
     if (stx.fireDrill) this.time.delayedCall(700, () => { if (this.phase === "downsizing") this.activateSprinklers("FIRE DRILL!", "Everybody out... onto the wet floor."); });
     for (let k = 0; k < stx.plusOne; k++) {
-      const pt = this.world.nearestWalkable(this.player.x + rand(-50, 50), this.player.y + 50);
+      const pt = this.safeSpot(this.player.x + rand(-50, 50), this.player.y + 50);
       const a = this.spawnEnemy("intern", pt.x, pt.y, "ally");
       a.makeAlly(30);
       this.fx.text(pt.x, pt.y - 40, "PLUS ONE!", { color: "#9fd3a8", size: 15, pop: true });
@@ -1368,6 +1364,53 @@ export class GameScene extends Phaser.Scene {
     const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
     if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return -1;
     return this.map.zoneGrid[ty * MAP_W + tx];
+  }
+
+  /** Inside the code-locked room while its door is still shut: nobody spawns, wanders or phases in there. */
+  inLockedRoom(x: number, y: number): boolean {
+    const z = this.vault.lockedZone;
+    return z >= 0 && this.zoneAt(x, y) === z;
+  }
+
+  /** The nearest walkable spot to (x, y) outside the locked room (an elevator if that's all there is). */
+  safeSpot(x: number, y: number): { x: number; y: number } {
+    const p = this.world.nearestWalkable(x, y);
+    if (!this.inLockedRoom(p.x, p.y)) return p;
+    const lift = this.map.spawns.find((s) => s.kind === "elevator") ?? this.map.spawns[0];
+    return this.world.nearestWalkable(lift.x, lift.y);
+  }
+
+  /** Somewhere for a coworker to wander off to before 5 PM (never the locked room). */
+  wanderSpot(): { x: number; y: number } {
+    const spots = this.map.wanderSpots.filter((s) => !this.inLockedRoom(s.x, s.y));
+    return pick(spots.length ? spots : this.map.wanderSpots);
+  }
+
+  /** Flow distance to the player from around a point (Infinity: there's no way to you from there). */
+  reachDist(x: number, y: number): number {
+    let best = Infinity;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) best = Math.min(best, this.flowNaive.distAt(x + dx * TILE, y + dy * TILE));
+    return best;
+  }
+
+  /**
+   * Safety net: a coworker with no way to reach you (walled in, stuck behind the locked door) comes back in through
+   * an entrance instead of holding up the quota forever. False if there's nowhere reachable to put them.
+   */
+  rescueStraggler(e: Enemy): boolean {
+    const spots = this.map.spawns.filter((s) => !this.inLockedRoom(s.x, s.y))
+      .map((s) => this.world.nearestWalkable(s.x, s.y))
+      .filter((p) => isFinite(this.reachDist(p.x, p.y)));
+    if (!spots.length) return false;
+    const wv = this.cameras.main.worldView;
+    const unseen = spots.filter((p) => !wv.contains(p.x, p.y));
+    const p = pick(unseen.length ? unseen : spots);
+    e.x = p.x;
+    e.y = p.y;
+    e.vx = e.vy = 0;
+    e.spawnGrace = Math.max(e.spawnGrace, 0.5);
+    this.fx.burst("pixel", p.x, p.y, 6, 0xb8bfc9);
+    return true;
   }
 
   /** Breaks every drywall tile within radius of a point. Returns how many came down. */

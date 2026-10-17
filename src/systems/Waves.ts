@@ -100,7 +100,9 @@ export class Waves {
   private pickSpawn(): SpawnDef {
     const g = this.g;
     const pl = g.player;
-    const cands = g.map.spawns.map((s) => ({ s, d: Math.hypot(s.x - pl.x, s.y - pl.y) }));
+    // The fire exit inside a code-locked room is out of bounds: anyone coming in there would be stuck behind the door.
+    const open = g.map.spawns.filter((s) => !g.inLockedRoom(s.x, s.y));
+    const cands = (open.length ? open : g.map.spawns).map((s) => ({ s, d: Math.hypot(s.x - pl.x, s.y - pl.y) }));
     const far = cands.filter((c) => c.d > 520);
     const pool = far.length ? far : cands;
     // Favour nearer-but-offscreen entrances so the fight comes to you.
@@ -125,7 +127,7 @@ export class Waves {
   private materialize(type: EnemyType, spawn: SpawnDef) {
     const g = this.g;
     const jitter = spawn.kind === "elevator" ? 30 : 18;
-    const p = g.world.nearestWalkable(spawn.x + rand(-jitter, jitter), spawn.y + rand(-6, 12));
+    const p = g.safeSpot(spawn.x + rand(-jitter, jitter), spawn.y + rand(-6, 12));
     const e = g.spawnEnemy(type, p.x, p.y, "hostile");
     e.spawnGrace = 0.35;
     if (spawn.kind === "elevator") {

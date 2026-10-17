@@ -289,6 +289,47 @@ try {
     }
   }
 
+  // The code-locked room: nobody spawns in it (the Marketing Lounge has a fire exit), and a coworker stuck in it gets out.
+  if (scenario === "locked") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    const room = await ev(() => {
+      const s = window.__HT.scene, v = s.vault;
+      for (let k = 0; k < 60 && v.room.name !== "Marketing Lounge"; k++) v.setupDay(s.dayCfg.chores);
+      window.__HT.god(true);
+      return v.room.name;
+    });
+    console.log("locked room:", room);
+    await ev(() => window.__HT.toFight());
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    const lounge = await ev(() => {
+      const s = window.__HT.scene;
+      s.quota = 999;
+      s.dayCfg.maxAlive = 40;
+      s.dayCfg.spawnEvery = 0.3;
+      // Park the player next to the lounge so its fire exit would be the favourite spawn.
+      const p = s.world.nearestWalkable(58.5 * 64, 14 * 64);
+      s.player.x = p.x; s.player.y = p.y;
+      // Somebody already stuck inside (as if they'd spawned there before the fix).
+      const e = s.spawnEnemy("intern", 59 * 64, 5 * 64, "hostile");
+      e.spawnGrace = 0;
+      window.__stuck = e;
+      return s.vault.lockedZone;
+    });
+    let inside = 0, maxInside = 0;
+    for (let i = 0; i < 40; i++) {
+      await sleep(250);
+      inside = await ev((z) => { const s = window.__HT.scene; return s.enemies.filter((e) => e !== window.__stuck && !e.dead && s.zoneAt(e.x, e.y) === z).length; }, lounge);
+      maxInside = Math.max(maxInside, inside);
+    }
+    const stuck = await ev((z) => { const s = window.__HT.scene, e = window.__stuck; return { dead: e.dead, stillInside: s.zoneAt(e.x, e.y) === z, x: Math.round(e.x), y: Math.round(e.y) }; }, lounge);
+    console.log("spawned inside the locked room (max seen):", maxInside, "| stuck coworker:", JSON.stringify(stuck), "| enemies:", await ev(() => window.__HT.scene.enemies.length));
+    await shot("l01-locked");
+  }
+
   // The end-of-day memo for a couple of days (one line each).
   if (scenario === "memo") {
     await sleep(700);
