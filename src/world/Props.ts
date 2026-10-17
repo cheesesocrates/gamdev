@@ -5,8 +5,8 @@ import type { GameScene } from "../scenes/GameScene";
 import type { FurnObj } from "./Furniture";
 import type { Collider } from "./World";
 
-/** Furniture light enough to shove around: break-room tables, coffee tables, desks and boxes. */
-const PUSHABLE = /^(break_table|coffee_table|box|ws_[abc]_\d+|ws_hr)$/;
+/** Furniture light enough to shove around: break-room tables, coffee tables, desks, boxes and potted plants. */
+const PUSHABLE = /^(break_table|coffee_table|box|ws_[abc]_\d+|ws_hr|plant)$/;
 
 interface Prop {
   f: FurnObj;
@@ -19,6 +19,9 @@ interface Prop {
   /** Colliders it already overlaps at home (cubicle partitions): ignored so desks can slide out. */
   neighbours: Set<Collider>;
   hitCd: Map<number, number>;
+  /** Potted plants shatter when they hit something hard; swept up overnight. */
+  fragile: boolean;
+  broken: boolean;
 }
 
 /**
@@ -36,7 +39,7 @@ export class Props {
       const neighbours = new Set<Collider>();
       g.world.queryBox(f.x - f.w / 2 - 2, f.y - f.h / 2 - 2, f.x + f.w / 2 + 2, f.y + f.h / 2 + 2, (c) => { if (c !== f.collider) neighbours.add(c); });
       const area = (f.w * f.h) / (TILE * TILE);
-      this.list.push({ f, homeX: f.x, homeY: f.y, vx: 0, vy: 0, mass: Math.max(0.6, area * 1.6), moving: false, neighbours, hitCd: new Map() });
+      this.list.push({ f, homeX: f.x, homeY: f.y, vx: 0, vy: 0, mass: Math.max(0.6, area * 1.6), moving: false, neighbours, hitCd: new Map(), fragile: f.key === "plant", broken: false });
     }
   }
 
@@ -46,8 +49,26 @@ export class Props {
       p.vx = p.vy = 0;
       p.moving = false;
       p.hitCd.clear();
+      p.broken = false;
+      p.f.sprite.setVisible(true);
       this.place(p, p.homeX, p.homeY);
     }
+  }
+
+  /** Something huge hit this piece of furniture: it flies (plants shatter). False if it isn't a prop. */
+  launch(f: FurnObj, vx: number, vy: number, by?: { id: number }): boolean {
+    const p = this.list.find((q) => q.f === f);
+    if (!p || p.broken) return false;
+    if (p.fragile) { this.shatter(p); return true; }
+    if (Math.hypot(p.vx, p.vy) > Math.hypot(vx, vy) * 0.6) return true;
+    p.vx = vx;
+    p.vy = vy;
+    p.moving = true;
+    // Whoever sent it flying doesn't get hit by it.
+    if (by) p.hitCd.set(by.id, 1.2);
+    this.g.audio.play("wood_heavy", { vol: 0.6, minGap: 80 });
+    this.g.fx.burst("pixel", f.x, f.y, 10, 0xd8c3a5);
+    return true;
   }
 
   private place(p: Prop, x: number, y: number) {
@@ -68,6 +89,7 @@ export class Props {
     if (g.phase === "title" || pl.dead) return;
     const jockey = GameState.stats.deskJockey;
     for (const p of this.list) {
+      if (p.broken) continue;
       const f = p.f;
       // Is the boss leaning on it?
       const cx = clamp(pl.x, f.x - f.w / 2, f.x + f.w / 2), cy = clamp(pl.y, f.y - f.h / 2, f.y + f.h / 2);
@@ -128,6 +150,7 @@ export class Props {
   }
 
   private bump(p: Prop, speed: number) {
+    if (p.fragile && speed > 480) { this.shatter(p); return; }
     if (speed < 160) return;
     const g = this.g;
     g.audio.play("wood", { vol: Math.min(0.6, speed / 900), minGap: 90 });
@@ -152,6 +175,31 @@ export class Props {
       g.hitEnemy(e, dmg, { angle: ang, kind: "chair", x: e.x, y: e.y, knock: speed * 0.9 });
       p.vx *= 0.65;
       p.vy *= 0.65;
+      if (p.fragile) { this.shatter(p); return; }
+    }
+  }
+
+  /** A flying pot plant breaks on impact: soil everywhere, and a little shrapnel for anyone close. */
+  private shatter(p: Prop) {
+    if (p.broken) return;
+    const g = this.g, f = p.f;
+    p.broken = true;
+    p.moving = false;
+    p.vx = p.vy = 0;
+    f.sprite.setVisible(false);
+    g.world.moveCollider(f.collider!, -9999, -9999, -9990, -9990);
+    this.navDirty = true;
+    g.fx.burst("pixel", f.x, f.y, 18, [0x6b4a33, 0x3f8f53, 0xc8683f]);
+    g.fx.burst("smoke", f.x, f.y, 3, 0x6b4a33);
+    g.fx.decal(f.x, f.y, "rubble", { scale: 0.7, alpha: 0.9, tint: 0x8a5a3b });
+    g.audio.play("plate", { vol: 0.6, minGap: 60 });
+    g.audio.play("crunch", { vol: 0.4, minGap: 60 });
+    if (g.phase === "downsizing") {
+      for (const e of [...g.enemies]) {
+        if (e.dead || !e.hostile || (e.x - f.x) ** 2 + (e.y - f.y) ** 2 > 80 * 80) continue;
+        e.stun = Math.max(e.stun, 0.6);
+        g.hitEnemy(e, 18 * GameState.stats.dmgMult, { angle: Math.atan2(e.y - f.y, e.x - f.x), kind: "chair", x: e.x, y: e.y, knock: 260 });
+      }
     }
   }
 }

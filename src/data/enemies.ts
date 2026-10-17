@@ -1,7 +1,8 @@
-export type EnemyType = "intern" | "fulltime" | "accountant" | "manager" | "hr" | "burnout" | "robot" | "consultant";
+export type EnemyType = "intern" | "fulltime" | "accountant" | "manager" | "hr" | "burnout" | "robot" | "consultant" | "hatchet" | "caller";
+export type BossKind = "consultant" | "hatchet" | "caller";
 
 export interface RangedDef {
-  kind: "calc" | "memo" | "bolt";
+  kind: "calc" | "memo" | "bolt" | "phone";
   dmg: number; // half-hearts
   speed: number;
   cooldown: number;
@@ -27,8 +28,31 @@ export interface EnemyDef {
   dodgy?: boolean;
   smart?: boolean; // avoids fire / live water when pathing
   boss?: boolean;
+  bossKind?: BossKind;
   tint?: number;
+  /** What they carry (and throw): a texture shown in their hands. */
+  held?: string;
+  heldScale?: number;
 }
+
+/** How each boss is announced: the banner, the PA, and the night-before memo. */
+export const BOSS_INFO: Record<BossKind, { sub: string; pa: string; memo: string }> = {
+  hatchet: {
+    sub: "is here to make some cuts",
+    pa: "Attention all staff. The Hatchet Man is on the floor. Please stand clear of the walls.",
+    memo: "Due to budget cuts, the Hatchet Man will personally oversee tomorrow's restructuring."
+  },
+  caller: {
+    sub: "has a few calls to make",
+    pa: "Attention all staff. The Cold Caller is on the line. Do not pick up the phones.",
+    memo: "Due to budget cuts, the Cold Caller will be making some calls tomorrow. Do not pick up."
+  },
+  consultant: {
+    sub: "has been brought in to 'optimize headcount'",
+    pa: "Attention all staff. An external consultant has arrived to optimize headcount.",
+    memo: "Due to budget cuts, an external consultant will be optimizing headcount tomorrow."
+  }
+};
 
 export const ENEMIES: Record<EnemyType, EnemyDef> = {
   intern: {
@@ -41,12 +65,12 @@ export const ENEMIES: Record<EnemyType, EnemyDef> = {
   },
   accountant: {
     type: "accountant", title: "Accountant", hp: 51, speed: 120, radius: 13,
-    sprites: ["manOld_hold", "womanOld_hold"], scale: 1.0, melee: 1, smart: true,
+    sprites: ["manOld_hold", "womanOld_hold"], scale: 1.0, melee: 1, smart: true, held: "p_calc", heldScale: 0.85,
     ranged: { kind: "calc", dmg: 1, speed: 360, cooldown: 1.7, range: 560, count: 1, spread: 0, keepDist: [230, 380] }
   },
   manager: {
     type: "manager", title: "Middle Manager", hp: 102, speed: 120, radius: 14,
-    sprites: ["hitman2_gun", "survivor2_gun"], scale: 1.05, melee: 1, smart: true,
+    sprites: ["hitman2_hold", "survivor2_hold"], scale: 1.05, melee: 1, smart: true, held: "p_memo", heldScale: 1.1,
     ranged: { kind: "memo", dmg: 1, speed: 320, cooldown: 2.3, range: 520, count: 3, spread: 0.22, keepDist: [180, 340] }
   },
   hr: {
@@ -64,7 +88,18 @@ export const ENEMIES: Record<EnemyType, EnemyDef> = {
   },
   consultant: {
     type: "consultant", title: "THE CONSULTANT", hp: 1750, speed: 115, radius: 30,
-    sprites: ["hitman2_machine"], scale: 2.1, melee: 2, boss: true, smart: true, tint: 0xffd7a8,
+    sprites: ["hitman2_hold"], scale: 2.1, melee: 2, boss: true, bossKind: "consultant", smart: true, tint: 0xffd7a8, held: "p_memo", heldScale: 0.9,
     ranged: { kind: "memo", dmg: 1, speed: 300, cooldown: 2.6, range: 700, count: 9, spread: 0.18, keepDist: [160, 360] }
+  },
+  // Day 3 (and every 9 days after): charges in a straight line through walls, glass and desks.
+  hatchet: {
+    type: "hatchet", title: "THE HATCHET MAN", hp: 1500, speed: 118, radius: 30,
+    sprites: ["hitman1_hold"], scale: 2.15, melee: 2, boss: true, bossKind: "hatchet", smart: true, tint: 0xf3c2b4, held: "i_stamp", heldScale: 0.62
+  },
+  // Day 6 (and every 9 days after): keeps its distance and lobs ringing desk phones that explode.
+  caller: {
+    type: "caller", title: "THE COLD CALLER", hp: 1350, speed: 104, radius: 28,
+    sprites: ["manBlue_hold"], scale: 2.0, melee: 2, boss: true, bossKind: "caller", smart: true, tint: 0xd2e2ff, held: "i_phone", heldScale: 0.6,
+    ranged: { kind: "phone", dmg: 2, speed: 0, cooldown: 2.3, range: 820, count: 1, spread: 0, keepDist: [300, 500] }
   }
 };

@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { TILE } from "../config";
-import { SFX_FILES, MUSIC_FILES, VOICE_FILES } from "../systems/Audio";
+import { SFX_FILES, MUSIC_FILES } from "../systems/Audio";
 
 export const CHAR_SPRITES = [
   "hitman1_gun", "hitman1_machine", "hitman1_silencer", "hitman1_stand", "hitman1_reload", "hitman1_hold",
@@ -40,8 +40,8 @@ export const FLOOR_INDEX: Record<number, number[]> = {
   11: [20, 33], // hall terrazzo
   12: [34, 35] // teal carpet
 };
-export const WALL_INDEX = { CAP: 21, FACE: 22, WINDOW: 23, FACE_ALT: 24, ELEV_L: 25, ELEV_R: 26, EXIT_L: 27, EXIT_R: 28, GLASS: 29, GLASS_FACE: 30, DRY_CAP: 31, DRY_FACE: 32 };
-const TILESET_COUNT = 36;
+export const WALL_INDEX = { CAP: 21, FACE: 22, WINDOW: 23, FACE_ALT: 24, ELEV_L: 25, ELEV_R: 26, EXIT_L: 27, EXIT_R: 28, GLASS: 29, GLASS_FACE: 30, DRY_CAP: 31, DRY_FACE: 32, VAULT_L: 36, VAULT_R: 37 };
+const TILESET_COUNT = 38;
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -61,7 +61,6 @@ export class BootScene extends Phaser.Scene {
     for (const i of ICONS) this.load.image(`icon_${i}`, `assets/icons/${i}.png`);
     for (const s of SFX_FILES) this.load.audio(`sfx_${s}`, `assets/audio/sfx/${s}.ogg`);
     for (const m of MUSIC_FILES) this.load.audio(`music_${m.key}`, `assets/audio/music/${m.file}`);
-    for (const v of VOICE_FILES) this.load.audio(`voice_${v}`, `assets/audio/voice/${v}.ogg`);
   }
 
   create() {
@@ -358,6 +357,43 @@ function makeTileset(scene: Phaser.Scene) {
       ctx.fillStyle = "#7a5a3c"; ctx.fillRect(x, T - 7, T, 7);
       ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(x, T - 7, T, 1);
     }
+    // ------------------------------------------------ locked security door (the code-lock puzzle room)
+    for (const [i, left] of [[36, true], [37, false]] as const) {
+      const x = at(i);
+      ctx.fillStyle = "#2b2733"; ctx.fillRect(x, 0, T, 16);
+      ctx.fillStyle = "#3b3545"; ctx.fillRect(x, 0, T, 3);
+      ctx.fillStyle = "#4a515d"; ctx.fillRect(x, 12, T, T - 12);
+      const lx = left ? x + 6 : x, lw = T - 6;
+      const steel = ctx.createLinearGradient(lx, 0, lx + lw, 0);
+      steel.addColorStop(0, "#9aa3b2"); steel.addColorStop(0.5, "#c3cad6"); steel.addColorStop(1, "#8e97a6");
+      ctx.fillStyle = steel; ctx.fillRect(lx, 16, lw, T - 24);
+      ctx.fillStyle = "rgba(0,0,0,0.18)";
+      for (let r = 0; r < 3; r++) ctx.fillRect(lx + 4, 22 + r * 9, lw - 8, 2);
+      // hazard stripes along the bottom
+      ctx.save();
+      ctx.beginPath(); ctx.rect(lx, T - 18, lw, 10); ctx.clip();
+      for (let k = -2; k < 12; k++) {
+        ctx.fillStyle = k % 2 ? "#1c1d21" : "#e9c25a";
+        ctx.beginPath();
+        ctx.moveTo(lx + k * 8, T - 8); ctx.lineTo(lx + k * 8 + 8, T - 8); ctx.lineTo(lx + k * 8 + 16, T - 18); ctx.lineTo(lx + k * 8 + 8, T - 18);
+        ctx.fill();
+      }
+      ctx.restore();
+      ctx.fillStyle = "#3a404b"; ctx.fillRect(left ? x + T - 2 : x, 16, 2, T - 24);
+      if (!left) {
+        // keypad with a red "locked" light
+        ctx.fillStyle = "#1c1d21"; ctx.fillRect(x + 36, 24, 18, 22);
+        ctx.fillStyle = "#3a3c44"; ctx.fillRect(x + 37, 25, 16, 20);
+        ctx.fillStyle = "#9ee6a8"; ctx.fillRect(x + 39, 27, 12, 4);
+        ctx.fillStyle = "#c9d1e6";
+        for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) ctx.fillRect(x + 39 + c * 4.2, 33 + r * 3.8, 3, 2.6);
+        ctx.fillStyle = "#ff4a3a"; ctx.beginPath(); ctx.arc(x + 45, 20, 2.6, 0, Math.PI * 2); ctx.fill();
+      } else {
+        // "AUTHORISED STAFF ONLY" plate
+        ctx.fillStyle = "#c4382c"; ctx.fillRect(x + 18, 22, 32, 9);
+        ctx.fillStyle = "#f7f4ea"; ctx.fillRect(x + 21, 25, 26, 3);
+      }
+    }
   });
   const tex = scene.textures.get("tileset");
   for (let i = 0; i < TILESET_COUNT; i++) tex.add(i, 0, i * TILE, 0, TILE, TILE);
@@ -374,6 +410,134 @@ function makeTextures(scene: Phaser.Scene) {
     ctx.fillRect(0, 0, 64, 64);
   });
   canvasTexture(scene, "px", 4, 4, (ctx) => { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, 4, 4); });
+
+  // ---- daily chore props (desktop printer, Wi-Fi router, mail cart), drawn in the furniture's 3/4 view
+  const shadowAt = (ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number) => {
+    ctx.fillStyle = "rgba(0,0,0,0.22)";
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+  };
+  canvasTexture(scene, "furn_printer", 70, 76, (ctx) => {
+    shadowAt(ctx, 35, 68, 31, 7);
+    ctx.strokeStyle = "#3a3f48"; ctx.lineWidth = 2;
+    // stand
+    ctx.fillStyle = "#aab2be"; ctx.fillRect(10, 38, 50, 8); ctx.strokeRect(10, 38, 50, 8);
+    ctx.fillStyle = "#8e96a4"; ctx.fillRect(10, 46, 50, 20); ctx.strokeRect(10, 46, 50, 20);
+    ctx.fillStyle = "#6c7482"; ctx.fillRect(28, 54, 14, 3);
+    // printer
+    const top = ctx.createLinearGradient(0, 14, 0, 32);
+    top.addColorStop(0, "#f4f6f9"); top.addColorStop(1, "#dfe3e9");
+    ctx.fillStyle = top; ctx.fillRect(7, 14, 56, 18); ctx.strokeRect(7, 14, 56, 18);
+    ctx.fillStyle = "#cdd2da"; ctx.fillRect(7, 32, 56, 10); ctx.strokeRect(7, 32, 56, 10);
+    ctx.fillStyle = "#fbf8ee";
+    ctx.save(); ctx.translate(35, 14); ctx.rotate(-0.05);
+    ctx.fillRect(-15, -10, 30, 12); ctx.strokeRect(-15, -10, 30, 12);
+    ctx.restore();
+    ctx.fillStyle = "#2a2c33"; ctx.fillRect(15, 18, 40, 4);
+    ctx.fillStyle = "#9ee6a8"; ctx.fillRect(45, 34, 12, 5);
+    ctx.fillStyle = "#4b9a63"; ctx.beginPath(); ctx.arc(14, 37, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.fillRect(9, 15, 52, 2);
+  });
+  canvasTexture(scene, "furn_router", 50, 72, (ctx) => {
+    shadowAt(ctx, 25, 65, 20, 5);
+    ctx.strokeStyle = "#111216"; ctx.lineWidth = 2;
+    ctx.fillStyle = "#3d4049"; ctx.fillRect(9, 28, 32, 8); ctx.strokeRect(9, 28, 32, 8);
+    ctx.fillStyle = "#2a2c33"; ctx.fillRect(9, 36, 32, 28); ctx.strokeRect(9, 36, 32, 28);
+    ctx.fillStyle = "#1c1d21"; for (let r = 0; r < 4; r++) ctx.fillRect(13, 40 + r * 5, 18, 2);
+    for (const [y, c] of [[41, "#3fa35a"], [47, "#f0c93a"], [53, "#3fa35a"], [59, "#2f64c8"]] as const) {
+      ctx.fillStyle = c; ctx.beginPath(); ctx.arc(36, y, 1.8, 0, Math.PI * 2); ctx.fill();
+    }
+    // router + antennas
+    ctx.strokeStyle = "#1c1d21"; ctx.lineWidth = 3; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(12, 20); ctx.lineTo(7, 3); ctx.moveTo(38, 20); ctx.lineTo(43, 3); ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.fillStyle = "#1c1d21"; ctx.fillRect(7, 18, 36, 11);
+    ctx.fillStyle = "#33363e"; ctx.fillRect(7, 18, 36, 3);
+    for (let i = 0; i < 4; i++) { ctx.fillStyle = i === 3 ? "#f0c93a" : "#3fa35a"; ctx.fillRect(12 + i * 6, 24, 3, 2); }
+  });
+  canvasTexture(scene, "furn_mailcart", 74, 66, (ctx) => {
+    shadowAt(ctx, 37, 59, 32, 6);
+    ctx.fillStyle = "#1c1d21";
+    for (const [x, y] of [[14, 57], [60, 57], [18, 52], [56, 52]] as const) { ctx.beginPath(); ctx.arc(x, y, 3.4, 0, Math.PI * 2); ctx.fill(); }
+    ctx.strokeStyle = "#6c7482"; ctx.lineWidth = 3;
+    ctx.strokeRect(10, 22, 54, 30);
+    // the canvas bin
+    ctx.strokeStyle = "#1c2a45"; ctx.lineWidth = 2;
+    ctx.fillStyle = "#22314f"; ctx.fillRect(9, 12, 56, 12); ctx.strokeRect(9, 12, 56, 12);
+    // envelopes and a parcel sticking out
+    const sheets: [number, number, number, string][] = [[20, 10, -0.3, "#fbf8ee"], [33, 8, 0.12, "#f3e3b5"], [46, 11, 0.35, "#fbf8ee"], [28, 14, -0.1, "#e9edf2"]];
+    for (const [x, y, a, c] of sheets) {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+      ctx.fillStyle = c; ctx.fillRect(-8, -6, 16, 11); ctx.strokeStyle = "#8a8578"; ctx.lineWidth = 1.5; ctx.strokeRect(-8, -6, 16, 11);
+      ctx.beginPath(); ctx.moveTo(-8, -6); ctx.lineTo(0, 0); ctx.lineTo(8, -6); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.fillStyle = "#b07a4f"; ctx.fillRect(50, 6, 12, 10); ctx.strokeStyle = "#6b4a33"; ctx.strokeRect(50, 6, 12, 10);
+    ctx.fillStyle = "#3d5a8f";
+    ctx.beginPath(); ctx.moveTo(9, 24); ctx.lineTo(65, 24); ctx.lineTo(61, 50); ctx.lineTo(13, 50); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#1c2a45"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.beginPath(); ctx.moveTo(14, 30); ctx.lineTo(60, 30); ctx.stroke();
+    ctx.fillStyle = "#f7f4ea"; ctx.fillRect(28, 34, 18, 8);
+    ctx.fillStyle = "#1c2a45"; ctx.fillRect(30, 37, 14, 2);
+  });
+  // Footprints for the generated props (so spawnFurniture sizes and anchors them like the rendered ones).
+  {
+    const man = scene.cache.json.get("furnManifest") as Record<string, unknown> | undefined;
+    if (man) {
+      const foot = (px: number) => px / (150 * 0.94);
+      man.printer = { w: 70, h: 76, anchorX: 0.5, anchorY: 68 / 76, footW: foot(48), footD: foot(26), height: 0.5 };
+      man.router = { w: 50, h: 72, anchorX: 0.5, anchorY: 65 / 72, footW: foot(32), footD: foot(18), height: 0.6 };
+      man.mailcart = { w: 74, h: 66, anchorX: 0.5, anchorY: 59 / 66, footW: foot(54), footD: foot(26), height: 0.5 };
+    }
+  }
+
+  // Wall-mounted PA speaker (front view).
+  canvasTexture(scene, "speaker", 36, 30, (ctx) => {
+    ctx.fillStyle = "#8f97a3"; ctx.fillRect(15, 0, 6, 6);
+    ctx.fillStyle = "#1c1d21"; ctx.beginPath(); ctx.roundRect(2, 5, 32, 24, 5); ctx.fill();
+    ctx.fillStyle = "#33353d"; ctx.beginPath(); ctx.roundRect(4, 7, 28, 20, 4); ctx.fill();
+    ctx.fillStyle = "#1c1d21"; ctx.beginPath(); ctx.arc(18, 17, 8.5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#4a4d57"; ctx.lineWidth = 1.2;
+    for (const r of [3, 5.5, 7.5]) { ctx.beginPath(); ctx.arc(18, 17, r, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.fillStyle = "#6c7280"; ctx.beginPath(); ctx.arc(18, 17, 1.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#4b9a63"; ctx.beginPath(); ctx.arc(29, 10, 1.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.16)"; ctx.fillRect(5, 7, 26, 1);
+  });
+
+  // Old desk phone (the Cold Caller's bombs).
+  canvasTexture(scene, "i_phone", 30, 26, (ctx) => {
+    ctx.fillStyle = "#6e6553"; ctx.beginPath(); ctx.roundRect(3, 8, 24, 17, 4); ctx.fill();
+    ctx.fillStyle = "#e3d9c4"; ctx.beginPath(); ctx.roundRect(4, 9, 22, 15, 3); ctx.fill();
+    ctx.fillStyle = "#b9ad95";
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) ctx.fillRect(8 + c * 4.5, 13 + r * 3.4, 3, 2.2);
+    ctx.fillStyle = "#c4382c"; ctx.beginPath(); ctx.arc(23, 21, 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#1c1d21";
+    ctx.beginPath(); ctx.roundRect(4, 2, 22, 6, 3); ctx.fill();
+    ctx.beginPath(); ctx.arc(5.5, 5, 4, 0, Math.PI * 2); ctx.arc(24.5, 5, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(7, 3, 16, 1.4);
+  });
+
+  // The Hatchet Man's giant FIRED stamp (top-down).
+  canvasTexture(scene, "i_stamp", 30, 26, (ctx) => {
+    ctx.fillStyle = "#7d1f17"; ctx.fillRect(2, 5, 26, 16);
+    ctx.fillStyle = "#c4382c"; ctx.fillRect(3, 6, 24, 14);
+    ctx.fillStyle = "#8a5a33"; ctx.fillRect(5, 8, 20, 10);
+    ctx.fillStyle = "#5e3b22"; ctx.beginPath(); ctx.arc(15, 13, 6.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#c97a3a"; ctx.beginPath(); ctx.arc(15, 13, 5.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,240,210,0.6)"; ctx.beginPath(); ctx.arc(13.5, 11.5, 1.8, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // Golden briefcase: the reward behind the code-locked door.
+  canvasTexture(scene, "i_briefcase", 40, 32, (ctx) => {
+    ctx.fillStyle = "#7a5a14"; ctx.beginPath(); ctx.roundRect(13, 2, 14, 8, 3); ctx.fill();
+    ctx.fillStyle = "#3b2c0b"; ctx.fillRect(16, 5, 8, 4);
+    ctx.fillStyle = "#7a5a14"; ctx.beginPath(); ctx.roundRect(2, 8, 36, 22, 4); ctx.fill();
+    const g = ctx.createLinearGradient(0, 8, 0, 30);
+    g.addColorStop(0, "#ffe08a"); g.addColorStop(0.5, "#e9b83a"); g.addColorStop(1, "#b98a1c");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(3, 9, 34, 20, 3); ctx.fill();
+    ctx.fillStyle = "#7a5a14"; ctx.fillRect(3, 17, 34, 2);
+    ctx.fillStyle = "#3b2c0b"; ctx.fillRect(9, 15, 5, 5); ctx.fillRect(26, 15, 5, 5);
+    ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.fillRect(6, 11, 12, 2);
+  });
   canvasTexture(scene, "shard", 10, 3, (ctx) => { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, 10, 3); });
   canvasTexture(scene, "papershred", 12, 4, (ctx) => {
     ctx.fillStyle = "#f3eedf"; ctx.fillRect(0, 0, 12, 4);
@@ -494,6 +658,38 @@ function makeTextures(scene: Phaser.Scene) {
       ctx.fill();
     }
   });
+
+  // Cartoon flame: six frames of flicker, used on burning tiles and burning coworkers.
+  {
+    const FW = 48, FH = 64, N = 6;
+    canvasTexture(scene, "flame", FW * N, FH, (ctx) => {
+      for (let k = 0; k < N; k++) {
+        const ph = (k / N) * Math.PI * 2;
+        const cx = k * FW + FW / 2, base = FH - 3;
+        const lay = (w: number, h: number, sway: number, color: string) => {
+          const tipX = cx + Math.sin(ph) * sway, tipY = base - h;
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(cx - w / 2, base - h * 0.3);
+          ctx.bezierCurveTo(cx - w / 2, base + 3, cx + w / 2, base + 3, cx + w / 2, base - h * 0.3);
+          ctx.bezierCurveTo(cx + w / 2, base - h * 0.62, tipX + w * 0.18, tipY + h * 0.3, tipX, tipY);
+          ctx.bezierCurveTo(tipX - w * 0.2, tipY + h * 0.34, cx - w / 2, base - h * 0.6, cx - w / 2, base - h * 0.3);
+          ctx.fill();
+        };
+        lay(42, 54 + Math.sin(ph * 2) * 5, 8, "#d8432a");
+        lay(32, 43 + Math.cos(ph * 2) * 4, 7, "#f0862a");
+        lay(20, 30 + Math.sin(ph * 3) * 3, 5, "#ffcf4a");
+        lay(10, 15 + Math.cos(ph) * 2, 2, "#fff2b0");
+        // a little detached lick of fire that flickers away
+        ctx.fillStyle = "#f0862a";
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(ph) * 9, base - 50 - Math.sin(ph) * 5, 3 + Math.sin(ph * 2), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+    const t = scene.textures.get("flame");
+    for (let k = 0; k < N; k++) t.add(k, 0, k * FW, 0, FW, FH);
+  }
 
   // Water layer stamps (tinted per pass when painting puddles).
   canvasTexture(scene, "w_disc", 64, 64, (ctx) => {

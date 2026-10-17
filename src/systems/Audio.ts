@@ -18,24 +18,16 @@ export const SFX_FILES = [
   "pickup_0", "pickup_1", "dodge_0", "dodge_1", "reload", "reload_done", "paper_0", "paper_1", "coins", "pot", "place"
 ];
 
-/** Kenney loops/jingles (.ogg) plus the jam's own tracks (.mp3). */
+/**
+ * Kenney loops (.ogg) plus the jam's own tracks (.mp3). Wins, losses and announcements are office
+ * sound effects (systems/OfficeSfx): no announcer voices, no arcade jingles.
+ */
 export const MUSIC_FILES: { key: string; file: string }[] = [
   { key: "lobby", file: "lobby.mp3" }, // Crunch Time (phase 1)
   { key: "fight", file: "fight.mp3" }, // The Downsizing (phase 2)
   { key: "title", file: "title.ogg" },
   { key: "review", file: "review.ogg" },
-  { key: "gameover", file: "gameover.ogg" },
-  { key: "ident", file: "ident.ogg" },
-  { key: "jingle_win", file: "jingle_win.ogg" },
-  { key: "jingle_chore", file: "jingle_chore.ogg" },
-  { key: "jingle_lose", file: "jingle_lose.ogg" }
-];
-
-export const VOICE_FILES = [
-  "fight", "prepare_yourself", "multi_kill", "combo", "combo_breaker", "flawless_victory", "game_over", "you_win", "you_lose",
-  "round_1", "round_2", "round_3", "round_4", "round_5", "final_round", "sudden_death", "begin", "winner",
-  "hurry_up", "time_over", "power_up", "level_up", "new_highscore", "mission_completed", "objective_achieved",
-  "war_reloading", "war_fire_in_the_hole", "war_look_out", "go", "ready"
+  { key: "gameover", file: "gameover.ogg" }
 ];
 
 export type MusicTrack = "title" | "lobby" | "review" | "fight" | "gameover" | "none";
@@ -71,6 +63,11 @@ export class AudioManager {
     } catch { /* storage unavailable */ }
   }
 
+  /** Adds sound groups built at runtime (the synthesised office sounds). */
+  addGroups(groups: Record<string, string[]>) {
+    for (const [name, keys] of Object.entries(groups)) this.groups.set(name, keys);
+  }
+
   saveSettings() {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({ sfx: this.sfxVolume, music: this.musicVolume, muted: this.muted }));
@@ -102,16 +99,6 @@ export class AudioManager {
     const jitter = opts.jitter ?? 0.08;
     const rate = (opts.rate ?? 1) * (1 + (Math.random() * 2 - 1) * jitter);
     this.scene.sound.play(key, { volume: (opts.vol ?? 0.5) * this.sfxVolume, rate });
-  }
-
-  voice(name: string, vol = 0.9) {
-    if (this.muted) return;
-    this.scene.sound.play(`voice_${name}`, { volume: vol * Math.max(0.4, this.sfxVolume) });
-  }
-
-  jingle(name: string, vol = 0.7) {
-    if (this.muted) return;
-    this.scene.sound.play(`music_${name}`, { volume: vol * this.musicVolume });
   }
 
   /** Crossfades to a looping track. */

@@ -1,6 +1,9 @@
 import Phaser from "phaser";
 import { CHAR_SCALE, DEPTH, TILE } from "../config";
 import { ENEMIES, EnemyDef, EnemyType } from "../data/enemies";
+
+const HATCHET_BARKS = ["YOU'RE DONE!", "CLEAR YOUR DESK!", "RESTRUCTURING!", "NOTHING PERSONAL!", "THIS IS A CUT!"];
+const CALLER_BARKS = ["CAN YOU HEAR ME NOW?", "LET'S CIRCLE BACK!", "PER MY LAST CALL...", "HOLD, PLEASE!", "IT'S FOR YOU!"];
 import { HOSTILE_BARKS, NPC_IDLE } from "../data/lines";
 import { GameState } from "../systems/GameState";
 import { angleDiff, chance, pick, rand } from "../util/math";
@@ -80,6 +83,21 @@ export class Enemy {
   /** Office Romance: an ally only until the infatuation wears off. */
   charmed = false;
   private spreadT = 0;
+  private flameSpr?: Phaser.GameObjects.Image;
+  /** The calculator / memo pad / phone in their hands. */
+  private heldImg?: Phaser.GameObjects.Image;
+  private throwHide = 0;
+  /** Line-of-sight fade during the fight (1 = in view). */
+  vis = 1;
+  /** Just got bowled over by a charging boss (don't hit twice). */
+  bowledCd = 0;
+  // the Hatchet Man / the Cold Caller
+  private dizzy = 0;
+  /** Seconds the current charge has been badly slowed by something it couldn't smash. */
+  private chargeBlocked = 0;
+  private chargeAim = 0;
+  private stompT = 0;
+  private confCd = 8;
   private panicT = 0;
   private panicA = 0;
   allyLife = 0;
@@ -113,6 +131,12 @@ export class Enemy {
     if (this.def.tint) this.sprite.setTint(this.def.tint);
     if (mode === "ally") this.sprite.setTint(0x9fd3a8);
     if (this.def.shield && mode !== "npc") this.addShield();
+    if (mode !== "npc") this.addHeld();
+  }
+
+  private addHeld() {
+    if (!this.def.held || this.heldImg) return;
+    this.heldImg = this.g.add.image(this.x, this.y, this.def.held).setScale((this.def.heldScale ?? 1) * this.def.scale);
   }
 
   /** Ambusher: stands in its room waiting until the boss wanders close (or it gets bored). */
@@ -133,6 +157,7 @@ export class Enemy {
     this.path = [];
     this.spawnGrace = rand(0.3, 1.0);
     if (this.def.shield && !this.shield) this.addShield();
+    this.addHeld();
   }
 
   wake() {
@@ -209,6 +234,8 @@ export class Enemy {
       if (Math.random() < dt * 5) this.g.fx.burst("water", this.x + rand(-8, 8), this.y + 4, 1);
     }
     if (this.spawnGrace > 0) this.spawnGrace -= dt;
+    if (this.throwHide > 0) this.throwHide -= dt;
+    if (this.bowledCd > 0) this.bowledCd -= dt;
     if (this.scapegoat > 0) this.scapegoat -= dt;
     if (this.bubbleTimer > 0) {
       this.bubbleTimer -= dt;
@@ -254,6 +281,9 @@ export class Enemy {
     this.y = p.y;
     const wantMove = Math.hypot(this.vx, this.vy) * dt;
     if (this.mode !== "npc" && wantMove > 1 && moved < wantMove * 0.25) this.stuckTimer += dt; else this.stuckTimer = Math.max(0, this.stuckTimer - dt);
+    // A charge that grinds to a crawl (concrete, a copier, a vending machine) counts as hitting it.
+    if (this.charging > 0 && wantMove > 1) this.chargeBlocked = moved < wantMove * 0.6 ? this.chargeBlocked + dt : 0;
+    else this.chargeBlocked = 0;
     // Safety valve: never leave a straggler wedged inside furniture (it would soft-lock the quota).
     if (this.stuckTimer > 3 && !g.world.walkableTile(Math.floor(this.x / TILE), Math.floor(this.y / TILE))) {
       const free = g.world.nearestWalkable(this.x, this.y);
@@ -371,8 +401,16 @@ export class Enemy {
       }
     }
 
+    if (this.def.boss && this.def.bossKind === "hatchet") {
+      if (this.hatchetAI(dt, d, dx, dy)) return;
+      if (this.stuckTimer > 0.35) g.smashWalls(this.x + mvx * (this.r + 12), this.y + mvy * (this.r + 12), this.r + 16);
+    }
+    if (this.def.boss && this.def.bossKind === "caller") {
+      this.callerAI(dt, d);
+      if (this.stuckTimer > 0.35) g.smashWalls(this.x + mvx * (this.r + 12), this.y + mvy * (this.r + 12), this.r + 16);
+    }
     // THE CONSULTANT: telegraphed charges and intern reinforcements.
-    if (this.def.boss) {
+    if (this.def.boss && (this.def.bossKind ?? "consultant") === "consultant") {
       this.bossSummonCd -= dt;
       if (this.bossSummonCd <= 0) {
         this.bossSummonCd = rand(8, 11);
@@ -558,6 +596,20 @@ export class Enemy {
   private shoot(tx: number, ty: number) {
     const g = this.g;
     const R = this.def.ranged!;
+    if (R.kind !== "bolt") this.throwHide = R.kind === "phone" ? 0.55 : 0.3;
+    if (R.kind === "phone") {
+      // Lead the target a little; when hurt, three at once.
+      const pl = g.player;
+      const lx = tx + pl.vx * 0.45, ly = ty + pl.vy * 0.45;
+      g.projectiles.lobPhone(this.x, this.y, lx, ly, this);
+      if (this.hp < this.maxHp * 0.5) {
+        const a = Math.atan2(ly - this.y, lx - this.x) + Math.PI / 2;
+        for (const s of [-1, 1]) g.projectiles.lobPhone(this.x, this.y, lx + Math.cos(a) * 130 * s, ly + Math.sin(a) * 130 * s, this);
+      }
+      g.audio.play("dodge", { vol: 0.3, rate: 0.8, minGap: 80 });
+      if (chance(0.3) && g.canBark()) this.say(pick(CALLER_BARKS), 1.4, "#e9c25a");
+      return;
+    }
     // Lead the target a little.
     const pl = g.player;
     const t = Math.hypot(tx - this.x, ty - this.y) / R.speed;
@@ -570,6 +622,104 @@ export class Enemy {
     g.audio.play(R.kind === "bolt" ? "laser" : "dodge", { vol: R.kind === "bolt" ? 0.25 : 0.2, rate: R.kind === "bolt" ? 1.5 : 1.6, minGap: 80 });
     this.vx -= Math.cos(base) * 50;
     this.vy -= Math.sin(base) * 50;
+  }
+
+  /**
+   * THE HATCHET MAN: stomps, locks on, and charges in a straight line, smashing drywall, glass and
+   * furniture. Concrete stops him cold and leaves him dizzy (free hits). Returns true while busy.
+   */
+  private hatchetAI(dt: number, d: number, dx: number, dy: number): boolean {
+    const g = this.g, pl = g.player;
+    if (this.dizzy > 0) {
+      this.dizzy -= dt;
+      this.vx *= Math.pow(0.02, dt);
+      this.vy *= Math.pow(0.02, dt);
+      if (chance(dt * 8)) g.fx.burst("spark", this.x + rand(-24, 24), this.y - this.r - 14, 1, 0xe9c25a);
+      if (this.dizzy <= 0) this.chargeCd = rand(1.4, 2.4);
+      return true;
+    }
+    if (this.charging > 0) {
+      this.charging -= dt;
+      this.attackCd -= dt;
+      const sp = Math.hypot(this.vx, this.vy) || 1;
+      this.facing = Math.atan2(this.vy, this.vx);
+      g.bossSmash(this, this.x + (this.vx / sp) * (this.r + 20), this.y + (this.vy / sp) * (this.r + 20), this.r + 12);
+      // Coworkers in the way get bowled over.
+      for (const o of g.enemies) {
+        if (o === this || o.dead || o.mode === "npc" || o.bowledCd > 0) continue;
+        if ((o.x - this.x) ** 2 + (o.y - this.y) ** 2 > (this.r + o.r + 10) ** 2) continue;
+        o.bowledCd = 0.8;
+        const side = Math.sign((o.x - this.x) * -this.vy + (o.y - this.y) * this.vx) || 1;
+        if (o.takeDamage(o.maxHp * 0.4, this.facing + side * 1.2, 520)) g.killEnemy(o, false);
+        g.fx.text(o.x, o.y - 30, "OOF!", { color: "#d0574a", size: 15, pop: true, dur: 0.5 });
+      }
+      if (d < this.r + pl.r + 8 && this.attackCd <= 0) {
+        this.attackCd = 1;
+        pl.damage(2, this.x, this.y, "charge", this);
+      }
+      if (chance(0.7)) g.fx.burst("pixel", this.x - this.vx * 0.03, this.y + this.r * 0.5, 2, 0xd8c3a5);
+      if (this.chargeBlocked > 0.07 || this.charging <= 0) {
+        const bonk = this.chargeBlocked > 0.07;
+        this.chargeBlocked = 0;
+        this.charging = 0;
+        this.vx *= 0.1;
+        this.vy *= 0.1;
+        if (bonk) {
+          this.dizzy = 2.4;
+          g.fx.shake(0.9);
+          g.audio.play("stomp", { vol: 0.9 });
+          g.audio.play("wall", { vol: 0.8 });
+          g.fx.text(this.x, this.y - this.r - 34, "BONK!", { color: "#e9c25a", size: 30, pop: true, dur: 1.1 });
+          g.tipOnce("hatchet", "He's dizzy! Hit him now. Dodge his charges so he slams into concrete walls.", "#e9c25a");
+        } else this.chargeCd = rand(1.2, 2.2);
+      }
+      return true;
+    }
+    this.chargeCd -= dt;
+    if ((this.chargeCd <= 0 && this.hasLos && d < 950) || this.chargeWind > 0) {
+      if (this.chargeWind === 0 && g.canBark()) this.say(pick(HATCHET_BARKS), 1.2, "#c4382c");
+      this.chargeWind += dt;
+      this.vx *= Math.pow(0.02, dt);
+      this.vy *= Math.pow(0.02, dt);
+      if (this.chargeWind < 0.75) this.chargeAim = Math.atan2(dy, dx);
+      this.facing = this.chargeAim;
+      this.stompT -= dt;
+      if (this.stompT <= 0) {
+        this.stompT = 0.34;
+        g.audio.play("stomp", { vol: 0.5, minGap: 100 });
+        g.fx.shake(0.1);
+        g.fx.burst("smoke", this.x, this.y + this.r * 0.6, 2, 0xd8c3a5);
+      }
+      g.drawChargeLane(this.x, this.y, this.chargeAim, this.r, Math.min(1, this.chargeWind / 1.05));
+      if (this.chargeWind > 1.05) {
+        this.chargeWind = 0;
+        this.charging = 1.6;
+        this.stuckTimer = 0;
+        this.chargeBlocked = 0;
+        this.vx = Math.cos(this.chargeAim) * 980;
+        this.vy = Math.sin(this.chargeAim) * 980;
+        g.audio.play("dodge", { vol: 0.7, rate: 0.5 });
+        g.fx.shake(0.3);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /** THE COLD CALLER: when hurt, a "conference call" rains phones in a ring around you. */
+  private callerAI(dt: number, d: number) {
+    const g = this.g, pl = g.player;
+    this.confCd -= dt;
+    if (this.hp < this.maxHp * 0.6 && this.confCd <= 0 && this.hasLos && d < 820) {
+      this.confCd = rand(9, 12);
+      this.throwHide = 0.8;
+      this.say("CONFERENCE CALL!", 1.6, "#e9c25a");
+      g.audio.play("phone", { vol: 0.6 });
+      for (let k = 0; k < 5; k++) {
+        const a = (k / 5) * Math.PI * 2 + rand(-0.2, 0.2), rr = rand(80, 150);
+        g.projectiles.lobPhone(this.x, this.y, pl.x + Math.cos(a) * rr, pl.y + Math.sin(a) * rr, this);
+      }
+    }
   }
 
   // ---------------------------------------------------------------- allies
@@ -724,7 +874,7 @@ export class Enemy {
     const g = this.g;
     let rot = this.facing;
     if (this.mode === "npc" && Math.hypot(this.vx, this.vy) < 10) rot = this.facing;
-    this.sprite.setPosition(this.x, this.y).setRotation(rot).setDepth(this.y + 4);
+    this.sprite.setPosition(this.x, this.y).setRotation(rot).setDepth(this.y + 4).setAlpha(this.vis);
     if (this.hitFlash > 0) this.sprite.setTintFill(0xffffff);
     else if (this.burn > 0) this.sprite.setTint(0xff9a6a);
     else if (this.stun > 0 || this.slip > 0) this.sprite.setTint(0x9fd8ff);
@@ -737,22 +887,37 @@ export class Enemy {
     if (this.chargeWind > 0.05) this.sprite.setTintFill(Math.floor(g.time.now / 70) % 2 ? 0xffffff : 0xc4382c);
     if (this.windup > 0.05) this.sprite.setScale(this.def.scale * CHAR_SCALE * (1 + Math.sin(g.time.now / 30) * 0.04));
     else this.sprite.setScale(this.def.scale * CHAR_SCALE);
-    this.shadow.setPosition(this.x, this.y + 8).setDepth(this.y - 30);
+    this.shadow.setPosition(this.x, this.y + 8).setDepth(this.y - 30).setAlpha(this.vis);
+    if (this.heldImg) {
+      const reach = 17 * this.def.scale * CHAR_SCALE;
+      this.heldImg.setPosition(this.x + Math.cos(rot) * reach, this.y + Math.sin(rot) * reach)
+        .setRotation(rot + Math.PI / 2).setDepth(this.y + 5)
+        .setVisible(this.mode !== "npc" && this.throwHide <= 0 && this.dizzy <= 0).setAlpha(this.vis);
+    }
 
     if (this.shield) {
       const sx = this.x + Math.cos(this.facing) * (this.r + 8);
       const sy = this.y + Math.sin(this.facing) * (this.r + 8);
       const down = this.stun > 0 || this.slip > 0;
-      this.shield.setPosition(sx, sy).setRotation(this.facing).setDepth(this.y + 6).setAlpha(down ? 0.35 : 1);
+      this.shield.setPosition(sx, sy).setRotation(this.facing).setDepth(this.y + 6).setAlpha((down ? 0.35 : 1) * this.vis);
     }
 
     // HP bar for anything damaged (or bosses): all bars share one Graphics, drawn by the scene.
-    if (this.mode !== "npc" && (this.hp < this.maxHp || this.def.boss)) {
+    if (this.mode !== "npc" && this.vis > 0.4 && (this.hp < this.maxHp || this.def.boss)) {
       const w = this.def.boss ? 90 : 36;
       g.queueHpBar(this.x - w / 2, this.y - this.r - 22, w, Math.max(0, this.hp / this.maxHp), this.ally ? 0x4b9a63 : this.def.boss ? 0xe9c25a : 0xe6304a);
     }
 
-    if (this.bubble && this.bubble.visible) this.bubble.setPosition(this.x, this.y - this.r - 26);
+    if (this.bubble && this.bubble.visible) this.bubble.setPosition(this.x, this.y - this.r - 26).setAlpha(this.vis);
+    if (this.burn > 0 && this.mode !== "npc") {
+      if (!this.flameSpr) this.flameSpr = g.add.image(this.x, this.y, "flame", 0).setOrigin(0.5, 0.95);
+      const t = g.time.now / 1000;
+      this.flameSpr.setVisible(this.sprite.visible).setAlpha(this.sprite.alpha)
+        .setFrame(Math.floor(t * 14 + this.id) % 6)
+        .setPosition(this.x + Math.sin(t * 6 + this.id) * 2, this.y + 6)
+        .setDepth(this.y + 7)
+        .setScale((0.75 + 0.1 * Math.sin(t * 10 + this.id)) * this.def.scale);
+    } else if (this.flameSpr?.visible) this.flameSpr.setVisible(false);
     void dt;
   }
 
@@ -760,6 +925,8 @@ export class Enemy {
     this.sprite.destroy();
     this.shadow.destroy();
     this.shield?.destroy();
+    this.flameSpr?.destroy();
+    this.heldImg?.destroy();
     this.bubble?.destroy();
   }
 }

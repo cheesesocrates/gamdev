@@ -6,6 +6,64 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 
 ## Unreleased
 
+### Story and announcements
+- A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.
+- Wall-mounted PA speakers in every room. Management's messages play through them with a chime and a crackle; the
+  speakers pulse and throw sound waves and the words are captioned (no synthesised voices).
+- 5 PM: the camera finds the nearest speaker for the budget-cuts announcement.
+- End of every day: an internal memo says what gets harder tomorrow, e.g. "Due to budget cuts, AI robots will be
+  added to divide the workload", a boss visiting, more chores, a bigger quota.
+
+### Crunch Time
+- Four new chores (12 in all, up to 7 a day): **Unjam the Printer** (alternate A/D; same side twice rips the page),
+  **Reset the Wi-Fi** (repeat the router's light sequence), **Sort the Mail** (send envelopes to the right cubby),
+  **Clean the Whiteboard** (scrub it clean, but don't touch the CEO's note).
+- Chores move around: desktop printers, a Wi-Fi router and a mail cart spawn in random rooms and halls every day, and
+  printing, shredding, whiteboard and email chores pick a different copier, shredder, board or desk each day.
+- Mistakes in a chore cost one second (a red "-1s" drops off the clock). The plant gets thirsty if you wander off it,
+  and coffee-machine leaks you miss now count.
+- The code-locked door: one room (Supply Closet, Restrooms or Marketing Lounge) is locked each day. Chores hide clues
+  to its 4-digit code on sticky notes; the digits you find go on your to-do list. The keypad lights up which digits
+  were right. Inside: a golden briefcase (a free gun or +15s overtime, and a heart).
+- Server cables are always six different colours.
+
+### The Downsizing
+- Line-of-sight shadows: the lights go out at 5 PM and walls block your view. You can still see through windows
+  (slightly dimmed) and over desks. Coworkers you can't see fade out, and the minimap only shows the ones you can see
+  (all of them once five or fewer are left).
+- Bosses every third day: **The Hatchet Man** (day 3) stomps, locks on and charges in a straight line, smashing
+  drywall, glass and furniture; a charge that hits concrete or a heavy machine leaves him dizzy. **The Cold Caller**
+  (day 6) lobs ringing desk phones that explode a second after landing (red ring = blast zone; the keyboard swats them
+  back). **The Consultant** moves to day 9. Then the rotation repeats.
+- Coworkers hold what they throw: calculators, memo pads, the Hatchet Man's FIRED stamp, the Cold Caller's phone.
+- Potted plants can be pushed (and shatter if they hit something hard). The little walls between back-to-back desks
+  are gone, so desks slide freely.
+- Fire is animated: flickering flames on every burning tile and on burning coworkers.
+- Enemy arrows only appear for bosses and when five or fewer coworkers are left to fire.
+- The shredder no longer gives you a paper-trail bag.
+
+### Upgrades and UI
+- Upgrade cards are clipboards: the board's colour is the rarity (wood, green, purple, gold), and every icon is
+  redrawn as a single-colour ballpoint sketch. Guns come as requisition slips.
+- Epic upgrades are rarer: the shop now guarantees one rare-or-better card instead of an epic, and epic/legendary
+  weights were halved.
+- Inventory hotbar at the bottom centre: only the guns you own, always in the same order (a new gun slots in between),
+  with ammo bars. Number keys and the mouse wheel follow the same order.
+- Title screen: just the logo and the buttons (no control list or floating icons).
+- The coffee machine mini-game is a proper espresso machine.
+
+### Sound
+- Office sound effects instead of arcade announcers: a reception desk bell for finished tasks, a rubber stamp,
+  a cash register for purchases and kill streaks, PA chimes, a punch clock and applause at the end of the day,
+  a dot-matrix printer for the pink slip, an error buzz for mistakes, keypad tones, ringing phones and more.
+  All synthesised in code; the voice clips and jingles are no longer loaded.
+
+### Performance
+- The shadows are drawn with stencil masks instead of a render texture (about 0.3 ms a frame in the stress test).
+
+### Tools
+- New playtest scenarios: `ui`, `boss`, `hatchet`, `vault`; `full` covers the intro and the memo.
+
 - Release: the game is online at https://rather-die-than-get-fired.vercel.app (Vercel project `rather-die-than-get-fired`;
   `vercel.json` + `.vercelignore` in the repo). Redeploy with `npx vercel@latest deploy --prod`.
 - Fix (UI): the loading-screen logo no longer overlaps the title logo on the first click.

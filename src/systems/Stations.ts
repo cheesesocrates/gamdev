@@ -36,26 +36,36 @@ export interface Action {
   run: () => void;
 }
 
-export function choreForStation(def: StationDef): ChoreId | null {
-  if (def.id === "emails") return "emails";
-  if (def.kind === "copier" && def.main) return "print";
-  if (def.kind === "shred") return "shred";
-  if (def.id === "coffee") return "coffee";
-  if (def.id === "presentation") return "presentation";
-  if (def.id === "memos") return "memos";
-  if (def.id === "server") return "server";
-  if (def.id === "ceo_plant") return "plant";
-  return null;
-}
+/** Which stations can host each chore. Every day each chore on the list picks one of them at random. */
+const CHORE_HOSTS: Record<ChoreId, (d: StationDef) => boolean> = {
+  emails: (d) => d.kind === "emails",
+  print: (d) => d.kind === "copier" || d.kind === "printer",
+  jam: (d) => d.kind === "printer" || d.kind === "copier",
+  shred: (d) => d.kind === "shred",
+  coffee: (d) => d.id === "coffee",
+  presentation: (d) => d.id === "presentation",
+  memos: (d) => d.id === "memos",
+  server: (d) => d.id === "server",
+  plant: (d) => d.id === "ceo_plant",
+  wifi: (d) => d.kind === "router",
+  mail: (d) => d.kind === "mailcart",
+  board: (d) => d.kind === "board"
+};
 
 const COOLERS_PER_DAY = 11;
 const STRIPS_PER_DAY = 15;
+/** Desktop printers, a Wi-Fi router and a mail cart turn up somewhere new every day. */
+const PRINTERS_PER_DAY = 3;
+type DailyProp = "cooler" | "powerstrip" | "printer" | "router" | "mailcart";
 
 export class Stations {
   g: GameScene;
   list: Station[] = [];
   coffeeFixed = false;
   private rings: Phaser.GameObjects.Graphics;
+  /** Today's chore -> the station hosting it. */
+  private hosts = new Map<ChoreId, Station>();
+  private hostChore = new Map<Station, ChoreId>();
 
   constructor(g: GameScene) {
     this.g = g;
@@ -114,9 +124,57 @@ export class Stations {
     g.world.rebuildNav();
     const strips = this.pickSpots("powerstrip", STRIPS_PER_DAY, taken, coolers);
     for (const p of strips) this.addProp("powerstrip", p.x, p.y);
+    g.world.rebuildNav();
+    for (const [kind, n] of [["printer", PRINTERS_PER_DAY], ["router", 1], ["mailcart", 1]] as const) {
+      for (const p of this.pickSpots(kind, n, taken, [])) this.addProp(kind, p.x, p.y);
+      g.world.rebuildNav();
+    }
+    this.assignChores(g.dayCfg.chores);
   }
 
-  private addProp(kind: "cooler" | "powerstrip", x: number, y: number) {
+  /** Each of today's chores picks a host: any copier or printer for printing, either shredder, any whiteboard... */
+  assignChores(chores: ChoreId[]) {
+    this.hosts.clear();
+    this.hostChore.clear();
+    const lockedZone = this.lockedZone();
+    for (const c of chores) {
+      const cands = this.list.filter((s) => CHORE_HOSTS[c](s.def) && !this.hostChore.has(s) && !s.wrecked && this.zoneOf(s) !== lockedZone);
+      const s = cands.length ? pick(cands) : this.list.find((x) => CHORE_HOSTS[c](x.def));
+      if (!s) continue;
+      this.hosts.set(c, s);
+      this.hostChore.set(s, c);
+    }
+  }
+
+  /** The chore this station hosts today (if any). */
+  choreAt(s: Station): ChoreId | null {
+    return this.hostChore.get(s) ?? null;
+  }
+
+  hostOf(c: ChoreId): Station | undefined {
+    return this.hosts.get(c);
+  }
+
+  /** Where today's chore is, for the to-do list. */
+  roomOf(c: ChoreId): string {
+    const s = this.hosts.get(c);
+    if (!s) return "";
+    const zi = this.zoneOf(s);
+    return zi >= 0 ? this.g.map.zones[zi].name : "Hallway";
+  }
+
+  private zoneOf(s: Station): number {
+    const tx = Math.floor(s.x / TILE), ty = Math.floor((s.box.y1 + 6) / TILE);
+    return this.g.map.zoneGrid[ty * MAP_W + tx] ?? -1;
+  }
+
+  /** The zone behind today's code-locked door (nothing gets put in there). */
+  private lockedZone(): number {
+    const name = this.g.vault?.room?.name;
+    return name ? this.g.map.zones.findIndex((z) => z.name === name) : -2;
+  }
+
+  private addProp(kind: DailyProp, x: number, y: number) {
     const furn = spawnFurniture(this.g, this.g.world, kind, x, y, kind === "powerstrip" ? { solid: false, shots: false } : {});
     const s = this.make({ id: `${kind}_${this.list.length}`, kind, x, y }, furn);
     s.dynamic = true;
@@ -136,11 +194,13 @@ export class Stations {
    * Random floor spots with a little taste: coolers stand against a wall and never plug a
    * corridor; some power strips land right next to a cooler (a combo for the observant).
    */
-  private pickSpots(kind: "cooler" | "powerstrip", count: number, taken: { x: number; y: number }[], coolers: { x: number; y: number }[]) {
+  private pickSpots(kind: DailyProp, count: number, taken: { x: number; y: number }[], coolers: { x: number; y: number }[]) {
     const w = this.g.world;
     const spawn = this.g.map.playerSpawn;
     const out: { x: number; y: number }[] = [];
-    const minSame = kind === "cooler" ? TILE * 5 : TILE * 3;
+    const wallProp = kind !== "powerstrip";
+    const minSame = kind === "powerstrip" ? TILE * 3 : kind === "cooler" ? TILE * 5 : TILE * 12;
+    const lockedZone = this.lockedZone();
     for (let tries = 0; tries < 1500 && out.length < count; tries++) {
       let tx: number, ty: number;
       if (kind === "powerstrip" && coolers.length && out.length < count * 0.4) {
@@ -152,12 +212,13 @@ export class Stations {
         ty = 1 + Math.floor(Math.random() * (MAP_H - 2));
       }
       if (!w.walkableTile(tx, ty) || this.nearDoor(tx, ty)) continue;
-      if (kind === "cooler") {
+      if (this.g.map.zoneGrid[ty * MAP_W + tx] === lockedZone) continue;
+      if (wallProp) {
         if (!w.tileSolid(tx, ty - 1)) continue;
         if (!w.walkableTile(tx - 1, ty) || !w.walkableTile(tx + 1, ty) || !w.walkableTile(tx, ty + 1)) continue;
       }
       const x = (tx + 0.5) * TILE + (kind === "powerstrip" ? rand(-10, 10) : 0);
-      const y = kind === "cooler" ? ty * TILE + 22 : (ty + 0.5) * TILE + rand(-8, 8);
+      const y = wallProp ? ty * TILE + 22 : (ty + 0.5) * TILE + rand(-8, 8);
       if ((x - spawn.x) ** 2 + (y - spawn.y) ** 2 < (TILE * 3) ** 2) continue;
       if (out.some((o) => (o.x - x) ** 2 + (o.y - y) ** 2 < minSame * minSame)) continue;
       if (taken.some((o) => (o.x - x) ** 2 + (o.y - y) ** 2 < (TILE * 1.4) ** 2)) continue;
@@ -194,9 +255,9 @@ export class Stations {
     const pl = g.player;
     // Crunch Time is for chores. Everything else in the office is a 5 PM weapon.
     if (g.phase === "crunch") {
-      const chore = choreForStation(s.def);
+      const chore = this.choreAt(s);
       if (!chore || !g.dayCfg.chores.includes(chore) || g.choresDone.has(chore)) return null;
-      return this.choreAction(chore, chore === "shred" ? () => this.shred(s, 26) : undefined);
+      return this.choreAction(chore);
     }
     if (g.phase !== "downsizing") return null;
     switch (s.def.kind) {
@@ -213,7 +274,6 @@ export class Stations {
       case "fridge": return s.used ? null : this.now("Steal Someone's Lunch", "use", () => this.stealLunch(s));
       case "arcade": return s.used ? null : this.now("Play One Round (+15% dmg today)", "use", () => this.playArcade(s));
       case "coffee": return GameState.unlocked.coffee && pl.cups < pl.maxCups ? this.now("Refill Coffee", "use", () => this.refillCoffee()) : null;
-      case "shred": return pl.shredBag < 40 ? this.now("Fill a Bag of Shredded Paper", "use", () => this.shred(s, 18)) : null;
     }
     return null;
   }
@@ -251,20 +311,11 @@ export class Stations {
     s.hot = true;
     s.copierHp = 30;
     s.fuse = fuse ? 3 : 0;
+    if (fuse) this.g.audio.play("copier_alarm", { vol: 0.6, jitter: 0 });
     s.furn?.sprite.setTint?.(0xff9a8a);
     g.fx.burst("smoke", s.x, s.y - 20, 6);
     g.audio.play("computer", { vol: 0.5 });
     g.fx.text(s.x, s.y - 50, fuse ? "RUN!" : "OVERHEATED", { color: "#ff7a6a", size: 18, pop: true });
-  }
-
-  private shred(s: Station, amount: number) {
-    const g = this.g;
-    g.player.shredBag = Math.min(40, g.player.shredBag + amount);
-    g.player.dropPaper = true;
-    g.hazards.paperPatch(s.x, s.y + 40, 1);
-    g.audio.play("shredder", { vol: 0.45 });
-    g.fx.burst("confetti", s.x, s.y, 16);
-    g.fx.text(s.x, s.y - 50, `+${amount} SHREDS (F toggles the trail)`, { color: "#f3eedf", size: 14, dur: 1.4 });
   }
 
   private fixCoffee() {
@@ -375,9 +426,9 @@ export class Stations {
     s.fuse = 0;
     s.furn?.sprite.setTint?.(0x4a4a4a);
     g.explosion(s.x, s.y, 190, 95, { friendly: true, fromCopier: true });
-    g.hazards.paperPatch(s.x, s.y, 2);
+    g.hazards.paperPatch(s.x, s.y, GameState.stats.kindling ? 3 : 2);
     g.hazards.igniteRadius(s.x, s.y, 170, 1.6);
-    if (chance(0.5)) g.audio.voice("war_fire_in_the_hole", 0.6);
+
   }
 
   update(dt: number) {
@@ -420,9 +471,8 @@ export class Stations {
         }
       }
       // Chore beacons.
-      const chore = choreForStation(s.def);
-      const showBeacon = g.phase === "crunch" && chore !== null && g.dayCfg.chores.includes(chore) && !g.choresDone.has(chore)
-        && !(chore === "shred" && s.def.id !== "shredder");
+      const chore = this.choreAt(s);
+      const showBeacon = g.phase === "crunch" && chore !== null && g.dayCfg.chores.includes(chore) && !g.choresDone.has(chore);
       if (showBeacon) {
         if (!s.marker) s.marker = g.add.image(s.x, s.y, "icon_exclamation").setDepth(DEPTH.WORLD_UI - 5).setTint(0xe9c25a).setScale(0.38);
         s.marker.setVisible(true).setPosition(s.x, s.box.y0 - 46 + Math.sin(g.time.now / 220 + s.x) * 5);

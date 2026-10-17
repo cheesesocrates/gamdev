@@ -96,7 +96,7 @@ export class Pickups {
       case "pizza":
         GameState.hp = st.maxHp;
         label = "PIZZA PARTY!";
-        g.audio.voice("power_up", 0.7);
+        g.audio.play("bell2", { vol: 0.5, jitter: 0 });
         break;
       case "coffee":
         if (!GameState.unlocked.coffee) {

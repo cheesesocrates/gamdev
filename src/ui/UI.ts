@@ -5,7 +5,25 @@ import { PerkDef, RARITY_COLOR } from "../data/perks";
 import { MAP_H, MAP_W, TILE } from "../config";
 import type { World } from "../world/World";
 import type { OfficeMap } from "../world/OfficeMap";
-import { perkLogo } from "./perkIcons";
+import { perkSketch } from "./perkIcons";
+import { sketchSvg } from "./sketch";
+
+/** A clipboard's metal clip (shared by every upgrade card). */
+const CLIP_SVG = `<svg viewBox="0 0 120 50" aria-hidden="true">
+  <defs><linearGradient id="cbMetal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6f7fa"/><stop offset=".5" stop-color="#c3c9d3"/><stop offset="1" stop-color="#8e96a4"/></linearGradient></defs>
+  <rect x="43" y="3" width="34" height="18" rx="9" fill="none" stroke="#7c8492" stroke-width="5"/>
+  <rect x="43" y="3" width="34" height="18" rx="9" fill="none" stroke="#d9dde4" stroke-width="1.6"/>
+  <path d="M16 48 L23 18 Q25 12 32 12 H88 Q95 12 97 18 L104 48 Z" fill="url(#cbMetal)" stroke="#5f6774" stroke-width="2"/>
+  <path d="M30 20 H90" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity=".75"/>
+  <circle cx="34" cy="38" r="3.4" fill="#6c7482"/><circle cx="86" cy="38" r="3.4" fill="#6c7482"/>
+</svg>`;
+
+/** A black binder clip for the gun requisition slips. */
+const BINDER_SVG = `<svg viewBox="0 0 60 34" aria-hidden="true">
+  <path d="M18 18 L22 3 H38 L42 18" fill="none" stroke="#9aa1ad" stroke-width="2.6" stroke-linejoin="round"/>
+  <path d="M6 32 L10 16 H50 L54 32 Z" fill="#26272c" stroke="#0f1013" stroke-width="2"/>
+  <path d="M13 20 H47" stroke="#55585f" stroke-width="2" stroke-linecap="round"/>
+</svg>`;
 import { ICON, WEAPON_ICON, heartSvg } from "./icons";
 import { INTROS, IntroId, introSeen, markIntro, resetIntros } from "./intros";
 
@@ -35,9 +53,11 @@ export interface ReviewData {
   rerollCost: number;
 }
 
-type Sfx = "hover" | "click" | "deal" | "stamp";
+type Sfx = "hover" | "click" | "deal" | "stamp" | "note" | "type";
 
-const FLOATIES = [ICON.slip, WEAPON_ICON.stapler, WEAPON_ICON.coffee, WEAPON_ICON.planes, WEAPON_ICON.confetti, ICON.clock, WEAPON_ICON.slips];
+/** The little PA speaker shown next to announcements. */
+const PA_SVG = `<svg viewBox="0 0 36 30" aria-hidden="true"><path d="M3 11 H9 L18 4 V26 L9 19 H3 Z" fill="#f7f4ea" stroke="#f7f4ea" stroke-width="2" stroke-linejoin="round"/><path d="M23 10 Q27 15 23 20 M27 6 Q34 15 27 24" fill="none" stroke="#e9c25a" stroke-width="2.6" stroke-linecap="round"/></svg>`;
+
 
 export class UI {
   root: HTMLElement;
@@ -75,7 +95,7 @@ export class UI {
       <div id="hud" class="hidden">
         <div class="h-tl">
           <div class="h-hearts"></div>
-          <div class="sticky"><div class="s-title">TO-DO BEFORE 5 PM</div><ul></ul></div>
+          <div class="sticky"><div class="s-title">TO-DO BEFORE 5 PM</div><ul></ul><div class="s-code hidden"></div></div>
         </div>
         <div class="h-tc">
           <div class="h-clock"><svg class="ring" viewBox="0 0 46 46"><circle cx="23" cy="23" r="18" fill="#ece5d3" stroke="#1c1d21" stroke-width="3"/><path class="wedge" fill="#e9c25a"/><circle cx="23" cy="23" r="18" fill="none" stroke="#1c1d21" stroke-width="3"/><path d="M23 23 V10" stroke="#1c1d21" stroke-width="3" stroke-linecap="round" class="hand"/></svg><div><div class="tm">3:00<small>PM</small></div><div class="left">120s LEFT</div></div></div>
@@ -84,13 +104,11 @@ export class UI {
           <div id="toasts"></div>
         </div>
         <div class="h-tr"><canvas class="minimap" width="220" height="165"></canvas></div>
-        <div class="h-bl">
-          <div class="w-row"></div>
-          <div class="w-card"><div class="w-icon"></div><div><div class="w-name">Stapler</div><div class="w-ammo">12/12</div><div class="bar"><i></i></div></div></div>
-          <div class="w-hint hidden">${ICON.mouse}SCROLL TO SWITCH</div>
+        <div class="h-bc">
+          <div class="hb-label"><span class="hb-name">Stapler</span><span class="hb-ammo">12/12</span><span class="w-hint hidden">${ICON.mouse}scroll to switch</span></div>
+          <div class="hb-slots"></div>
         </div>
         <div class="h-br">
-          <div class="bag hidden"></div>
           <div class="dodge">DODGE <span class="pips"></span></div>
         </div>
         <div id="prompt" class="hidden"><div class="ring"><svg viewBox="0 0 34 34"><circle class="tr" cx="17" cy="17" r="14.5"/><circle class="fl" cx="17" cy="17" r="14.5" stroke-dasharray="91.1" stroke-dashoffset="91.1"/></svg><span>E</span></div><div class="lbl"></div></div>
@@ -101,6 +119,7 @@ export class UI {
       <div id="banner" class="hidden"><div class="inner"><div class="big"></div><div class="small"></div></div></div>
       <div id="unlock" class="hidden"><div class="u-ico"></div><div><div class="k">NEW</div><div class="n"></div><div class="d"></div></div></div>
       <div id="screens"></div>
+      <div id="pa" class="hidden"><div class="pa-ico">${PA_SVG}</div><div class="pa-txt"></div></div>
       <div id="flash"></div>`;
     this.toastBox = $("#toasts", this.root);
     const mmc = $("canvas.minimap", this.root) as HTMLCanvasElement;
@@ -192,14 +211,55 @@ export class UI {
       $(".sticky", hud).classList.toggle("hidden", !crunch);
       $(".h-hearts", hud).classList.toggle("hidden", !fight);
       $(".h-quota", hud).classList.toggle("hidden", !fight);
-      $(".h-tr", hud).classList.toggle("hidden", !fight);
-      $(".h-bl", hud).classList.toggle("hidden", !fight);
+      $(".h-tr", hud).classList.toggle("hidden", !(fight || crunch));
+      $(".h-bc", hud).classList.toggle("hidden", !fight);
       $(".h-br", hud).classList.toggle("hidden", !fight);
       if (!fight) this.setBoss(null, 0);
       if (mode !== "none" && was) {
-        gsap.from(hud.querySelectorAll(".h-tl > :not(.hidden), .h-tc > :not(.hidden):not(#toasts), .h-tr:not(.hidden), .h-bl:not(.hidden), .h-br:not(.hidden)"), { y: -20, opacity: 0, duration: 0.4, stagger: 0.05, ease: "power3.out", clearProps: "opacity,transform" });
+        gsap.from(hud.querySelectorAll(".h-tl > :not(.hidden), .h-tc > :not(.hidden):not(#toasts), .h-tr:not(.hidden), .h-bc:not(.hidden), .h-br:not(.hidden)"), { y: -20, opacity: 0, duration: 0.4, stagger: 0.05, ease: "power3.out", clearProps: "opacity,transform" });
       }
     });
+  }
+
+  /** Captions whatever the PA speakers are saying (null hides it). */
+  pa(text: string | null, color = "#e9c25a") {
+    const el = $("#pa", this.root);
+    if (!text) {
+      if (!el.classList.contains("hidden")) gsap.to(el, { opacity: 0, y: 10, duration: 0.25, onComplete: () => { el.classList.add("hidden"); gsap.set(el, { clearProps: "opacity,transform" }); } });
+      return;
+    }
+    gsap.killTweensOf(el);
+    const txt = $(".pa-txt", el);
+    txt.textContent = text;
+    txt.style.color = color;
+    const was = el.classList.contains("hidden");
+    el.classList.remove("hidden");
+    gsap.set(el, { clearProps: "opacity,transform" });
+    if (was) gsap.from(el, { y: 24, opacity: 0, duration: 0.35, ease: "back.out(2)" });
+    gsap.fromTo($(".pa-ico", el), { scale: 1.3 }, { scale: 1, duration: 0.4, ease: "back.out(3)" });
+  }
+
+  /** The door-code line on the to-do note: the room, and the digits found so far. */
+  setCode(room: string | null, digits: (number | null)[], open = false) {
+    this.set("code", `${room}|${digits.join(",")}|${open}`, () => {
+      const el = $(".sticky .s-code", this.root);
+      el.classList.toggle("hidden", !room);
+      if (!room) return;
+      el.classList.toggle("open", open);
+      el.innerHTML = `<span class="lk">${ICON.lock}</span><div><div class="t">${esc(room)}${open ? " (open!)" : " door code"}</div><div class="dg">${digits.map((d) => `<b class="${d === null ? "q" : ""}">${d === null ? "?" : d}</b>`).join("")}</div></div>`;
+      gsap.fromTo(el, { scale: 1.12 }, { scale: 1, duration: 0.4, ease: "back.out(3)" });
+    });
+  }
+
+  /** A mistake in a chore costs time: the clock shakes and a red "-1s" drops off it. */
+  penalty(text: string) {
+    const c = $(".h-clock", this.root);
+    const p = document.createElement("div");
+    p.className = "pen";
+    p.textContent = text;
+    c.appendChild(p);
+    gsap.fromTo(p, { y: 0, opacity: 1 }, { y: 34, opacity: 0, duration: 1, ease: "power2.out", onComplete: () => p.remove() });
+    gsap.fromTo(c, { x: -7 }, { x: 0, duration: 0.45, ease: "elastic.out(1.2, 0.3)" });
   }
 
   /** Day and overtime live on the menus now; kept so the scene can call it unconditionally. */
@@ -277,28 +337,51 @@ export class UI {
     });
   }
 
+  /** Inventory hotbar: nine numbered slots, your guns in them, the one in your hand raised. */
   setWeapons(w: WeaponHud) {
     const active = w.slots.find((s) => s.id === w.active) ?? w.slots[0];
     if (!active) return;
     if (w.armed && this.lastActive && this.lastActive !== active.id) this.switched = true;
     if (w.armed) this.lastActive = active.id;
-    const card = $(".w-card", this.root);
-    this.set("w-set", `${w.slots.map((s) => s.id).join(",")}|${w.active}|${w.armed}|${this.switched}`, () => {
-      card.style.setProperty("--wc", active.color);
-      $(".w-icon", card).innerHTML = WEAPON_ICON[active.id] ?? "";
-      $(".w-name", card).textContent = active.name;
-      const row = $(".w-row", this.root);
-      row.innerHTML = w.slots.length > 1 ? w.slots.map((s) => `<div class="w-slot ${s.id === w.active ? "on" : ""}" data-w="${s.id}" style="--wc:${s.color}">${WEAPON_ICON[s.id] ?? ""}</div>`).join("") : "";
-      $(".w-hint", this.root).classList.toggle("hidden", w.slots.length < 2 || !w.armed || this.switched);
-      if (w.armed) gsap.fromTo($(".w-icon", card), { scale: 0.7 }, { scale: 1, duration: 0.3, ease: "back.out(3)" });
+    const bar = $(".h-bc", this.root);
+    const box = $(".hb-slots", bar);
+    this.set("hb-set", `${w.slots.map((s) => s.id).join(",")}|${w.active}|${this.switched}`, () => {
+      // The roster: only guns you own, always in the same order, no gaps. A new gun slots in where it belongs.
+      const ids = w.slots.map((s) => s.id);
+      const before = (box.dataset.ids ?? "").split(",").filter(Boolean);
+      if (box.dataset.ids !== ids.join(",")) {
+        box.dataset.ids = ids.join(",");
+        box.innerHTML = w.slots.map((s) => `<div class="hb-slot" data-w="${s.id}" title="${esc(s.name)}" style="--wc:${s.color}"><b>${s.key}</b><span class="hb-ico">${WEAPON_ICON[s.id] ?? ""}</span><span class="hb-bar"><i></i></span></div>`).join("");
+        if (before.length) {
+          for (const id of ids) {
+            if (before.includes(id)) continue;
+            const fresh = box.querySelector<HTMLElement>(`.hb-slot[data-w="${id}"]`);
+            if (fresh) gsap.from(fresh, { scale: 0, y: -30, duration: 0.45, ease: "back.out(2.5)" });
+          }
+        }
+        this.cache.delete("hb-bars");
+      }
+      box.querySelectorAll<HTMLElement>(".hb-slot").forEach((slot) => {
+        const on = slot.dataset.w === w.active;
+        const wasOn = slot.classList.contains("on");
+        slot.classList.toggle("on", on);
+        if (on && !wasOn) gsap.fromTo(slot, { y: 6 }, { y: 0, duration: 0.3, ease: "back.out(3)" });
+      });
+      $(".hb-name", bar).textContent = active.name;
+      $(".w-hint", bar).classList.toggle("hidden", w.slots.length < 2 || this.switched);
     });
-    this.set("w-ammo", `${active.text}|${active.frac.toFixed(2)}|${active.warn}`, () => {
-      $(".w-ammo", card).textContent = active.text;
-      ($(".bar i", card)).style.width = `${Math.max(0, Math.min(1, active.frac)) * 100}%`;
-      card.classList.toggle("warn", active.warn);
+    this.set("hb-ammo", `${active.text}|${active.warn}`, () => {
+      const a = $(".hb-ammo", bar);
+      a.textContent = active.text;
+      a.classList.toggle("warn", active.warn);
     });
-    this.set("w-dry", w.slots.map((s) => (s.warn ? 1 : 0)).join(""), () => {
-      w.slots.forEach((s) => this.root.querySelector(`.w-slot[data-w="${s.id}"]`)?.classList.toggle("dry", s.warn));
+    this.set("hb-bars", w.slots.map((s) => `${s.id}:${s.frac.toFixed(2)}:${s.warn ? 1 : 0}`).join(","), () => {
+      for (const s of w.slots) {
+        const slot = box.querySelector<HTMLElement>(`.hb-slot[data-w="${s.id}"]`);
+        if (!slot) continue;
+        ($(".hb-bar i", slot)).style.width = `${Math.max(0, Math.min(1, s.frac)) * 100}%`;
+        slot.classList.toggle("dry", s.warn);
+      }
     });
   }
 
@@ -382,6 +465,7 @@ export class UI {
   }
 
   toast(text: string, color = "#e9c25a", life = 2.6) {
+    this.sfx?.("note");
     const t = document.createElement("div");
     t.className = "toast";
     t.style.setProperty("--tc", color);
@@ -498,7 +582,6 @@ export class UI {
   showTitle(best: string, h: { play: () => void; tutorial: () => void }) {
     const el = this.screen("title", "", `
       <div class="bg-grid"></div>
-      ${FLOATIES.map((svg) => `<div class="floaty">${svg}</div>`).join("")}
       <div class="t-wrap">
         <img class="t-logo-img" src="${asset("assets/ui/logo.png")}" alt="Rather Die Than Get Fired" draggable="false">
         <div class="t-btns">
@@ -507,7 +590,6 @@ export class UI {
         </div>
         ${best ? `<div class="t-best">${esc(best)}</div>` : ""}
       </div>
-      <div class="t-keys"><span><kbd>WASD</kbd> move</span><span><kbd>CLICK</kbd> shoot</span><span><kbd>SPACE</kbd> dodge</span><span><kbd>E</kbd> interact</span><span><kbd>ESC</kbd> pause</span></div>
       <div class="t-credit">NASCON '26 · art &amp; sound: Kenney (CC0)</div>`);
     $("#start", el).addEventListener("click", () => { if (!this.guarded(el)) h.play(); });
     $("#tutorial", el).addEventListener("click", () => { if (!this.guarded(el)) { resetIntros(); h.tutorial(); } });
@@ -517,18 +599,12 @@ export class UI {
       gsap.fromTo(logo, { y: -140, scale: 0.7, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.8, ease: "back.out(1.6)" });
       // The flame breathes.
       this.titleTweens.push(gsap.to(logo, { scale: 1.025, rotation: 0.8, duration: 1.4, delay: 0.9, yoyo: true, repeat: -1, ease: "sine.inOut", transformOrigin: "50% 80%" }));
-      this.slideUp(el.querySelectorAll(".t-btns .btn, .t-best, .t-keys"), 0.35);
+      this.slideUp(el.querySelectorAll(".t-btns .btn, .t-best"), 0.35);
     };
     if (document.getElementById("boot")) {
       gsap.set(logo, { opacity: 0 });
       this.afterBoot.push(intro);
     } else intro();
-    // Office junk drifting around in the background.
-    el.querySelectorAll<HTMLElement>(".floaty").forEach((f, i) => {
-      const left = i % 2 === 0;
-      gsap.set(f, { left: `${left ? gsap.utils.random(3, 20) : gsap.utils.random(78, 92)}%`, top: `${gsap.utils.random(8, 78)}%`, rotation: gsap.utils.random(-30, 30), scale: gsap.utils.random(0.7, 1.1) });
-      this.titleTweens.push(gsap.to(f, { y: gsap.utils.random(-40, 40), x: gsap.utils.random(-30, 30), rotation: `+=${gsap.utils.random(-40, 40)}`, duration: gsap.utils.random(3, 5), yoyo: true, repeat: -1, ease: "sine.inOut" }));
-    });
   }
 
   /** Shows a phase's rules once (ever), then runs `then`. Already seen: runs it right away. */
@@ -687,22 +763,114 @@ export class UI {
   }
 
   private cardHtml(p: PerkDef, stacks: number, i: number, o: { cost?: number; free?: boolean }) {
-    const rc = RARITY_COLOR[p.rarity];
-    return `<div class="card" data-i="${i}" style="--rc:${rc}">
-      <div class="c-band">${p.rarity.toUpperCase()}</div>
-      <div class="c-logo">${perkLogo(p.icon, rc)}</div>
-      <h4>${esc(p.name)}</h4>
-      <p>${esc(p.desc)}</p>
-      <div class="c-foot">${o.free ? `<span class="c-cost free">FREE</span>` : `<span class="c-cost">${ICON.clock}${o.cost}s</span>`}<span class="c-own">${stacks > 0 ? `${stacks}/${p.max}` : ""}</span></div>
+    return `<div class="card r-${p.rarity}" data-i="${i}">
+      <div class="cb-clip">${CLIP_SVG}</div>
+      <div class="cb-paper">
+        <div class="c-band">${p.rarity.toUpperCase()}</div>
+        <div class="c-logo">${perkSketch(p.icon)}</div>
+        <h4>${esc(p.name)}</h4>
+        <p>${esc(p.desc)}</p>
+        <div class="c-foot">${o.free ? `<span class="c-cost free">FREE</span>` : `<span class="c-cost">${ICON.clock}${o.cost}s</span>`}<span class="c-own">${stacks > 0 ? `${stacks}/${p.max}` : ""}</span></div>
+      </div>
     </div>`;
   }
 
   private gunHtml(g: GunOffer, i: number) {
-    return `<div class="gun" data-g="${i}" style="--wc:${g.color}">
-      <div class="g-ico">${WEAPON_ICON[g.id] ?? ""}</div>
+    return `<div class="gun" data-g="${i}">
+      <div class="g-clip">${BINDER_SVG}</div>
+      <div class="g-ico">${sketchSvg(WEAPON_ICON[g.id] ?? "", `gun:${g.id}`)}</div>
       <div class="g-txt"><h4>${esc(g.name)}</h4><p>${esc(g.desc)}</p></div>
       <div class="g-cost">${ICON.clock}${g.cost}s</div>
     </div>`;
+  }
+
+  /** Start of a run: who you are and why everyone is about to come after you. */
+  showLore(lines: string[], onDone: () => void) {
+    const el = this.screen("lore", "", `
+      <div class="lore clickable">
+        <div class="lr-lines">${lines.map(() => `<p class="lr"></p>`).join("")}</div>
+        <div class="lr-foot"><span class="lr-hint">CLICK TO CONTINUE</span><button class="btn big red hidden" id="lgo">CLOCK IN</button></div>
+      </div>
+      <button class="btn ghost small lr-skip" id="lskip">SKIP</button>`);
+    const ps = Array.from(el.querySelectorAll<HTMLElement>(".lr"));
+    let i = -1, typing: gsap.core.Tween | null = null, finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("keydown", onKey, true);
+      onDone();
+    };
+    const next = () => {
+      if (this.guarded(el) || finished) return;
+      if (typing && typing.isActive()) { typing.progress(1); return; }
+      i++;
+      if (i >= lines.length) { finish(); return; }
+      const p = ps[i];
+      const text = lines[i];
+      const o = { n: 0 };
+      p.classList.add("on");
+      typing = gsap.to(o, {
+        n: text.length, duration: Math.min(2.2, text.length * 0.032), ease: "none",
+        onUpdate: () => {
+          const n = Math.round(o.n);
+          if (n > (p.textContent?.length ?? 0) && text[n - 1] !== " ") this.sfx?.("type");
+          p.textContent = text.slice(0, n);
+        },
+        onComplete: () => {
+          p.textContent = text;
+          if (i === lines.length - 1) {
+            $(".lr-hint", el).classList.add("hidden");
+            const b = $("#lgo", el);
+            b.classList.remove("hidden");
+            gsap.from(b, { y: 30, opacity: 0, duration: 0.35, ease: "back.out(2)" });
+          }
+        }
+      });
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (!document.getElementById("lore")) { window.removeEventListener("keydown", onKey, true); return; }
+      if (e.code === "Space" || e.code === "Enter") { e.preventDefault(); e.stopPropagation(); next(); }
+      if (e.code === "Escape") { e.stopPropagation(); finish(); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    el.addEventListener("click", (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest("#lskip")) { if (!this.guarded(el)) finish(); return; }
+      if (t.closest("#lgo")) { if (!this.guarded(el)) finish(); return; }
+      next();
+    });
+    this.slideUp([$(".lore", el)]);
+    gsap.delayedCall(0.55, () => next());
+  }
+
+  /** End of the day: management's memo about what changes tomorrow (read out over the PA). */
+  showMemo(d: { day: number; lines: string[] }, onDone: () => void) {
+    const el = this.screen("memo", "dim", `
+      <div class="memo clickable">
+        <div class="m-paper">
+          <div class="m-head"><span>INTERNAL MEMO</span><span class="m-day">DAY ${d.day}</span></div>
+          <div class="m-meta"><div><b>TO:</b> All Staff</div><div><b>FROM:</b> Management</div><div><b>RE:</b> Tomorrow</div></div>
+          <ul class="m-lines">${d.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>
+          <div class="m-sign">Thank you for your continued sacrifice.</div>
+          <div class="m-stamp">BUDGET CUTS</div>
+        </div>
+        <button class="btn big red" id="mgo">CLOCK IN FOR DAY ${d.day}</button>
+      </div>`);
+    const go = () => {
+      if (this.guarded(el) || el.dataset.done) return;
+      el.dataset.done = "1";
+      window.removeEventListener("keydown", onKey, true);
+      onDone();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (!document.getElementById("memo")) { window.removeEventListener("keydown", onKey, true); return; }
+      if (e.code === "Space" || e.code === "Enter") { e.preventDefault(); e.stopPropagation(); go(); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    $("#mgo", el).addEventListener("click", go);
+    this.slideUp([...el.querySelectorAll(".m-paper, #mgo")]);
+    gsap.from(el.querySelectorAll(".m-lines li"), { x: -24, opacity: 0, duration: 0.35, delay: 0.45, stagger: 0.18, ease: "power3.out" });
+    gsap.fromTo($(".m-stamp", el), { scale: 3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.28, delay: 0.9 + d.lines.length * 0.18, ease: "power4.in", onComplete: () => this.sfx?.("stamp") });
   }
 
   showAnnounce(onSkip: () => void): (i: number, text: string, cls?: string) => void {

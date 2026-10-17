@@ -170,8 +170,8 @@ class GameStateClass {
 
   /**
    * One card per slot; each slot only draws perks at or above its minimum rarity
-   * (falling back to anything left). The shop uses [common, rare, epic] so every
-   * Performance Review dangles at least one epic-or-better upgrade.
+   * (falling back to anything left). The shop uses [common, common, rare]: epics and
+   * legendaries turn up now and then, not every review.
    */
   rollSlots(minRarity: Rarity[], stage: "combat" | "chore" = "combat", rarityBoost = 1): PerkDef[] {
     let pool = shuffle(PERKS.filter((p) => this.available(p) && (stage === "chore") === (p.stage === "chore")));

@@ -14,13 +14,14 @@ to those files, and keep that part working. Put your name next to a role and sta
 ## A. Gameplay & Combat
 
 **Owns:** `src/entities/` (Player, Enemy, Projectiles, Pickups), `src/systems/Waves.ts`, `src/systems/GameState.ts`,
-`src/data/enemies.ts`, `src/data/days.ts`, `src/data/perks.ts`, `src/data/weapons.ts`, and the combat helpers in
-`src/scenes/GameScene.ts` (`hitEnemy`, `killEnemy`, `explosion`, `shockwave`, `keyboardSwing`, `tonerBlast`, `vortex`).
+`src/systems/Vault.ts`, `src/data/enemies.ts`, `src/data/days.ts`, `src/data/perks.ts`, `src/data/weapons.ts`, and the
+combat helpers in `src/scenes/GameScene.ts` (`hitEnemy`, `killEnemy`, `explosion`, `shockwave`, `keyboardSwing`,
+`tonerBlast`, `vortex`, `bossSmash`, `phoneLanded`, `phoneBlast`).
 
 1. **Difficulty curve (days 1-10).** Play each day, write down how it felt, tune quota, spawn rate, enemy mix and HP in
    `src/data/days.ts`. Target: a new player clears day 1, the day-5 boss is beatable with 2-3 upgrades.
-2. **Two more bosses** for days 10 and 15 (THE CONSULTANT is day 5). Ideas: *The CFO* (budget cuts: drains your ammo),
-   *The HR Overlord* (summons riot-shield guards). Give each a telegraphed attack and a weakness.
+2. **A fourth boss** for the rotation (Hatchet Man day 3, Cold Caller day 6, Consultant day 9). Ideas: *The CFO*
+   (budget cuts: drains your ammo), *The HR Overlord* (summons riot-shield guards). Telegraphed attack + a weakness.
 3. **Two new coworker types.** Ideas: *IT Guy* who drops a small turret; *Team Lead* who speeds up nearby coworkers.
 4. **Weapon feel and price pass.** Recoil, fire rate, damage and shop price for all nine guns. Add one weapon-specific
    upgrade for each new gun (coffee and laser already have some, see `requires` in `perks.ts`).
@@ -32,7 +33,8 @@ to those files, and keep that part working. Put your name next to a role and sta
 
 **Owns:** `src/world/` (OfficeMap, World, Nav, Hazards, Furniture, Props), the generated textures and tiles in
 `src/scenes/BootScene.ts`, `tools/render-assets.mjs`, `tools/furniture-specs.mjs`, everything in `public/assets/`,
-`src/systems/Effects.ts`, `src/systems/Audio.ts`, and the lighting code in `GameScene.ts` (`updateLighting`).
+`src/systems/Effects.ts`, `src/systems/Audio.ts`, `src/systems/OfficeSfx.ts`, `src/systems/Speakers.ts`,
+`src/systems/Vision.ts` (the fight's line-of-sight shadows), and the lighting code in `GameScene.ts` (`updateLighting`).
 
 1. **Replace the placeholder characters.** Custom office workers for the player, the seven coworker types and the boss
    (Kenney sprites are stand-ins). Keep the "faces right" convention; walk and attack frames if there's time.
@@ -40,19 +42,19 @@ to those files, and keep that part working. Put your name next to a role and sta
    every room is reachable. Stretch goal: a second floor layout for later days.
 3. **Effects pass.** Fire, puddle edges, electricity, explosions, drywall debris and a muzzle flash per weapon.
 4. **Lighting.** Smooth afternoon-to-dusk during Crunch Time, emergency red at 5 PM, flicker when a strip overloads.
-5. **Audio.** A distinct sound for each new weapon (planes, toner, confetti, mister, keyboard, slips), announcer lines
-   for sprinklers and bosses, music volume balance, duck the music while paused.
+5. **Audio.** A distinct sound for each new weapon (planes, toner, confetti, mister, keyboard, slips), more office
+   sounds in `OfficeSfx.ts` (no voice lines: the team decided against them), music balance, duck music while paused.
 6. **Low-end check.** Measure FPS on a weak laptop with 30 coworkers, floods and fire (`__HT.perf()` in the console);
    pack furniture sprites into an atlas if loading or draw calls are slow.
 
 ## C. UI, Mini-games & Release
 
-**Owns:** `src/ui/` (UI.ts, ui.css, theme.css, Minigames.ts, minigames.css, intros.ts, icons.ts, perkIcons.ts),
+**Owns:** `src/ui/` (UI.ts, ui.css, theme.css, Minigames.ts, minigames.css, intros.ts, icons.ts, perkIcons.ts, sketch.ts),
 `index.html`, the HUD and menu wiring in `GameScene.ts` (`updateHud*`, `renderReview`, `showResults`, `togglePause`),
 `tools/playtest.mjs`, `README.md`, `CHANGELOG.md`, and the build.
 
-1. **A second mini-game per chore** (eight more), picked at random, so days don't feel the same. Keep them as readable
-   as the current ones.
+1. **More chores.** There are 12 mini-games now (up to 7 a day, hosts move around daily). Ideas: answer the phones,
+   restock the vending machine, fix the projector. Each needs a clear way to fail (mistakes cost a second).
 2. **Settings.** Screen-shake toggle, a controls page, and a colour-blind friendly option for the rarity colours.
 3. **First-time hints in the world.** An arrow to the first chore and to the first trap on day 1; check that new
    players understand the Performance Review without reading.

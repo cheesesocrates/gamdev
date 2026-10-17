@@ -2,6 +2,8 @@
  * Perk logos: one tiny sticker per upgrade, drawn as inline SVG (64x64) in the
  * same ink-outline style as the rest of the UI. Ids match PerkDef.icon.
  */
+import { sketchSvg } from "./sketch";
+
 const K = "#1c1d21";
 const O = `stroke="${K}" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"`;
 const T = `stroke="${K}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"`;
@@ -100,6 +102,12 @@ const LOGOS: Record<string, string> = {
   command: `<path d="M28 12 H36 L40 20 L34 50 L32 54 L30 50 L24 20 Z" fill="#c4382c" ${O}/>${LINE("M24 20 H40", 3)}${BOLT(48, 22, 0.55)}${BOLT(16, 40, 0.45)}`,
   hostile: `${FLAME(22, 34, 0.8)}${FLAME(42, 30, 0.95)}${LINE("M28 52 h10", 3)}`
 };
+
+/** The perk drawn in ballpoint pen, straight onto a clipboard's paper. */
+export function perkSketch(id: string): string {
+  const inner = LOGOS[id] ?? `<text x="32" y="42" text-anchor="middle" font-family="Jersey 10, monospace" font-size="41" fill="${K}">?</text>`;
+  return sketchSvg(`<svg viewBox="0 0 64 64">${inner}</svg>`, `perk:${id}`);
+}
 
 /** A perk logo on a rarity-ringed sticker. */
 export function perkLogo(id: string, ring: string): string {

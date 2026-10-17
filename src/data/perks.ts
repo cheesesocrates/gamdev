@@ -22,7 +22,7 @@ export const RARITY_COLOR: Record<Rarity, string> = {
   legendary: "#d8a93b"
 };
 
-export const RARITY_WEIGHT: Record<Rarity, number> = { common: 60, rare: 30, epic: 12, legendary: 4 };
+export const RARITY_WEIGHT: Record<Rarity, number> = { common: 60, rare: 30, epic: 6, legendary: 2 };
 export const RARITY_RANK: Record<Rarity, number> = { common: 0, rare: 1, epic: 2, legendary: 3 };
 
 export const PERKS: PerkDef[] = [
@@ -100,7 +100,7 @@ export const PERKS: PerkDef[] = [
   { id: "electric", name: "Electric Personality", desc: "Every puddle you make is live.", rarity: "rare", cost: 0, max: 1, icon: "electric", stage: "chore" },
   { id: "autocomplete", name: "Out of Office", desc: "One chore a day finishes itself.", rarity: "rare", cost: 0, max: 2, icon: "autocomplete", stage: "chore" },
   { id: "prepared", name: "Come Prepared", desc: "Start every Downsizing with a shield heart.", rarity: "rare", cost: 0, max: 3, icon: "prepared", stage: "chore" },
-  { id: "kindling", name: "Kindling", desc: "Start each day with a full bag of paper. Paper burns longer.", rarity: "rare", cost: 0, max: 1, icon: "kindling", stage: "chore" },
+  { id: "kindling", name: "Kindling", desc: "Paper burns 60% longer, and exploding copiers scatter extra burning paper.", rarity: "rare", cost: 0, max: 1, icon: "kindling", stage: "chore" },
   { id: "hotcopiers", name: "Planned Obsolescence", desc: "Every copier starts the fight overheated: one good shot and it blows.", rarity: "epic", cost: 0, max: 1, icon: "hotcopiers", stage: "chore" },
   { id: "livewire", name: "Live Wire", desc: "Overloaded power strips zap the nearest coworker every second.", rarity: "rare", cost: 0, max: 1, icon: "livewire", stage: "chore" },
   { id: "firedrill", name: "Fire Drill", desc: "The sprinklers go off as every fight starts. Puddles everywhere.", rarity: "rare", cost: 0, max: 1, icon: "firedrill", stage: "chore" },

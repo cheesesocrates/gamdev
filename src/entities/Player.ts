@@ -204,7 +204,11 @@ export class Player {
 
     // ---- weapon switching
     if (this.armed) {
-      if (inp.switchTo !== null) this.switchWeapon(WEAPONS[inp.switchTo]);
+      // Number keys pick from the guns you own, in roster order (same as the hotbar).
+      if (inp.switchTo !== null) {
+        const owned = WEAPONS.filter((w) => this.weaponUnlocked(w));
+        if (owned[inp.switchTo]) this.switchWeapon(owned[inp.switchTo]);
+      }
       if (inp.cycle !== 0) {
         // Scroll steps to the next weapon you own, wrapping around.
         const n = WEAPONS.length;
@@ -288,17 +292,6 @@ export class Player {
     // ---- hazards on the player
     this.environment(dt);
 
-    // ---- paper trail from the shred bag
-    if (this.shredBag > 0 && this.dropPaper) {
-      const i = g.hazards.idx(this.x, this.y);
-      if (i !== this.lastPaperTile) {
-        this.lastPaperTile = i;
-        if (g.hazards.addPaper(i)) {
-          this.shredBag--;
-          if (Math.random() < 0.4) g.audio.play("paper", { vol: 0.25, minGap: 80 });
-        }
-      }
-    }
 
     // ---- weapons
     this.updateWeapons(dt, inp);

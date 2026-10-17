@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { TILE } from "../config";
-import { EnemyType } from "../data/enemies";
+import { ENEMIES, EnemyType } from "../data/enemies";
 import { ELEVATOR_LINES } from "../data/lines";
 import { chance, pick, rand, randInt, weightedPick } from "../util/math";
 import { SpawnDef } from "../world/OfficeMap";
@@ -68,13 +68,13 @@ export class Waves {
     }
     if (g.phase !== "downsizing") return;
 
-    // Boss day: THE CONSULTANT arrives once 40% of the quota is fired.
+    // Boss day: today's boss arrives once 40% of the quota is fired.
     const cfg = g.dayCfg;
     if (cfg.boss && !this.bossSpawned && g.fired >= Math.floor(g.quota * 0.4)) {
       this.bossSpawned = true;
       const el = pick(this.elevators.length ? this.elevators.map((e) => e.spawn) : g.map.spawns);
-      this.queue.push({ type: "consultant", spawn: el, t: 1.8 });
-      g.bossIncoming();
+      this.queue.push({ type: cfg.bossType, spawn: el, t: 1.8 });
+      g.bossIncoming(cfg.bossType);
       this.openElevator(el, 4);
     }
 
@@ -132,7 +132,7 @@ export class Waves {
       e.vy = 140;
       if (chance(0.15) && g.canBark()) e.say(pick(ELEVATOR_LINES), 1.4);
     }
-    if (type === "consultant") this.boss = e;
+    if (ENEMIES[type].boss) this.boss = e;
     g.fx.burst("pixel", p.x, p.y, 6, 0xb8bfc9);
   }
 }

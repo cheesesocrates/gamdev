@@ -1,7 +1,7 @@
 import { EnemyType } from "./enemies";
 import { shuffle } from "../util/math";
 
-export type ChoreId = "emails" | "print" | "shred" | "coffee" | "presentation" | "memos" | "server" | "plant";
+export type ChoreId = "emails" | "print" | "shred" | "coffee" | "presentation" | "memos" | "server" | "plant" | "jam" | "wifi" | "mail" | "board";
 
 export const CHORE_INFO: Record<ChoreId, { label: string; hold: number; room: string }> = {
   emails: { label: "Reply-All to Emails", hold: 3.0, room: "Executive Suite" },
@@ -11,7 +11,11 @@ export const CHORE_INFO: Record<ChoreId, { label: string; hold: number; room: st
   presentation: { label: "Prep the Board Deck", hold: 3.0, room: "Boardroom" },
   memos: { label: "Sign the Layoff Memos", hold: 3.0, room: "HR Department" },
   server: { label: "Reboot the Server", hold: 4.0, room: "Server Core" },
-  plant: { label: "Water the CEO's Plant", hold: 2.0, room: "Executive Suite" }
+  plant: { label: "Water the CEO's Plant", hold: 2.0, room: "Executive Suite" },
+  jam: { label: "Unjam the Printer", hold: 2.0, room: "" },
+  wifi: { label: "Reset the Wi-Fi", hold: 2.0, room: "" },
+  mail: { label: "Sort the Mail", hold: 2.0, room: "" },
+  board: { label: "Clean the Whiteboard", hold: 2.0, room: "" }
 };
 
 export interface DayConfig {
@@ -30,9 +34,16 @@ export interface DayConfig {
   /** What got harder today compared to yesterday. */
   growth: "more" | "longer" | null;
   boss: boolean;
+  /** Which boss turns up on a boss day. */
+  bossType: EnemyType;
 }
 
-const CHORE_ORDER: ChoreId[] = ["emails", "print", "shred", "coffee", "presentation", "memos", "server", "plant"];
+/** A boss every third day: the Hatchet Man, then the Cold Caller, then the Consultant, and round again. */
+const BOSS_ROTATION: EnemyType[] = ["hatchet", "caller", "consultant"];
+
+const CHORE_ORDER: ChoreId[] = ["emails", "print", "shred", "coffee", "presentation", "memos", "server", "plant", "jam", "wifi", "mail", "board"];
+/** Twelve chores to draw from, but never more than seven on one day's list. */
+const MAX_CHORES = 7;
 
 /**
  * Day 1 is three quick chores so the fight comes sooner. After that the load alternates between two knobs:
@@ -41,13 +52,13 @@ const CHORE_ORDER: ChoreId[] = ["emails", "print", "shred", "coffee", "presentat
  */
 export function choreLoad(day: number) {
   const step = day - 1;
-  const added = Math.min(CHORE_ORDER.length - 3, Math.ceil(step / 2));
+  const added = Math.min(MAX_CHORES - 3, Math.ceil(step / 2));
   return { count: 3 + added, lengthLevel: step - added };
 }
 
 function rollChores(count: number, prev?: ChoreId[]): ChoreId[] {
   let list = shuffle([...CHORE_ORDER]).slice(0, count);
-  for (let i = 0; i < 6 && prev && count < CHORE_ORDER.length && list.every((c) => prev.includes(c)) && prev.length === count; i++) {
+  for (let i = 0; i < 6 && prev && list.every((c) => prev.includes(c)) && prev.length === count; i++) {
     list = shuffle([...CHORE_ORDER]).slice(0, count);
   }
   return list;
@@ -77,6 +88,7 @@ export function dayConfig(day: number, prevChores?: ChoreId[]): DayConfig {
     chores: rollChores(load.count, prevChores),
     lengthLevel: load.lengthLevel,
     growth,
-    boss: day % 5 === 0
+    boss: day % 3 === 0,
+    bossType: BOSS_ROTATION[(Math.max(1, Math.floor(day / 3)) - 1) % BOSS_ROTATION.length]
   };
 }

@@ -2,8 +2,8 @@
 
 A top-down office survival shooter made for the NASCON '26 game jam (themes: **Time** and **Fire**).
 
-You're the highest-paid executive at a failing company. You have until **5:00 PM** to finish your chores. Then the
-budget cuts land, and every coworker on the floor wants you fired.
+You're the best employee this office has ever had, and the most expensive. You have until **5:00 PM** to finish your
+chores. Then the budget cuts land, and every coworker on the floor has done the math: your salary pays for five of theirs.
 
 **Team docs:** [CHANGELOG.md](CHANGELOG.md) (every change, newest first) · [docs/TEAM_PLAN.md](docs/TEAM_PLAN.md) (who owns what)
 
@@ -26,29 +26,37 @@ Each phase explains itself once with a rules card before it starts. **TUTORIAL**
 Menus slide up and ignore clicks for half a second, so a stray click never buys or skips anything.
 
 1. **Crunch Time (120 s):** a clock ticks from 3:00 to 5:00 PM. Walk to the glowing stations on your sticky note and
-   press **E**. Every chore is a small mini-game that looks like the job: water a plant that won't sit still, line a
-   page up on the copier, feed the shredder, tighten the coffee machine's leaks, stop the deck on the GROWTH slide,
-   sign layoff memos, patch server cables, type a reply-all.
-   Water coolers and power strips spawn in new places every day, so scout them. Done early? Press **ENTER**: half of
-   the time left is banked as Overtime. Missed chores add to the firing quota.
-2. **Performance Review:** three upgrade offers (one is always epic or better) and two guns, of which you can buy one.
-   Everything is paid in Overtime and priced so a good day buys one thing and a great day two. Unspent time carries over.
-3. **5:00 PM:** *"BUDGET CUTS HAVE BEEN MADE. DOWNSIZING HAS BEGUN."* Coworkers turn hostile and more pour out of the
-   elevators, stairwells and fire exits.
-4. **The Downsizing:** fire the quota before they fire you. Press **E** by a cooler, power strip, copier, toilet,
+   press **E**. Every chore is a small mini-game that looks like the job (12 of them, up to 7 a day): water a plant
+   that won't sit still, line a page up on the copier, feed the shredder, tighten the coffee machine's leaks, stop the
+   deck on the GROWTH slide, sign layoff memos, patch server cables, type a reply-all, unjam a printer, reset the Wi-Fi,
+   sort the mail, clean a whiteboard. **Mistakes cost a second.**
+   Chores move around: printers, the Wi-Fi router and the mail cart turn up in new rooms and halls every day, and a
+   chore can be done at any copier, shredder or whiteboard the to-do list points to. Water coolers and power strips
+   also spawn in new places every day, so scout them. Done early? Press **ENTER**: half of the time left is banked as
+   Overtime. Missed chores add to the firing quota.
+   **The locked door:** one room is behind a code-locked security door each day. Chores hide clues to the 4-digit code
+   (on a sticky note while you do them); punch it into the keypad. Wrong guesses cost a second but show which digits
+   were right. Inside: a golden briefcase (a free gun or overtime, plus a heart).
+2. **Performance Review:** three upgrade offers on clipboards (one rare or better; epics are a treat) and two guns,
+   of which you can buy one. Everything is paid in Overtime and priced so a good day buys one thing and a great day
+   two. Unspent time carries over.
+3. **5:00 PM:** the PA speakers on the walls chime: *"BUDGET CUTS HAVE BEEN MADE. DOWNSIZING HAS BEGUN."* Coworkers
+   turn hostile and more pour out of the elevators, stairwells and fire exits.
+4. **The Downsizing:** the lights go out. Walls block your view (windows and desks don't), and coworkers you can't see
+   fade into the dark. Fire the quota before they fire you. Press **E** by a cooler, power strip, copier, toilet,
    vending machine or fridge and the trap or bonus goes off instantly. Clear the quota to pick one free chore-stage
-   upgrade (the only place those appear), then do it all again tomorrow, harder.
+   upgrade (the only place those appear), read management's memo about what gets harder tomorrow ("Due to budget cuts,
+   AI robots will be added to divide the workload"), then do it all again.
 
 ### Controls
 | | |
 |---|---|
 | WASD / arrows | Move |
 | Mouse | Aim. Click to fire (the stapler and toner are one shot per click, the rest fire while held) |
-| Mouse wheel / Q / 1-9 | Switch weapon |
+| Mouse wheel / Q / 1-9 | Switch weapon (the hotbar shows the guns you own, in a fixed order) |
 | Space / Shift / right-click | Dodge roll (i-frames; roll into desks to send them flying) |
 | E | Chores, traps, refills |
 | R | Reload the stapler |
-| F | Toggle the shredded-paper trail |
 | Enter | Clock out early (all chores done) |
 | Esc / P | Pause (volume, how to play) · M mutes |
 
@@ -68,10 +76,16 @@ the fight starts; scroll to switch.
 ### Coworkers
 Runners duck behind desks when you can see them and rush you when you're close or reloading. Shooters keep their
 distance. HR Directors carry riot shields: slip them in water, bonk them with the keyboard, or bounce a shot off a
-wall to hit them. Some coworkers wait in other rooms and ambush you together. Every 5th day: **THE CONSULTANT**.
+wall to hit them. Some coworkers wait in other rooms and ambush you together. Coworkers who throw things hold them
+(calculators, memo pads, phones).
+
+**Bosses, every third day:** **The Hatchet Man** (day 3) stomps, locks on and charges in a straight line through
+drywall, glass and furniture; dodge so he slams into concrete and he's dizzy. **The Cold Caller** (day 6) lobs ringing
+desk phones that blow up a second after they land (swat one back with the keyboard). **The Consultant** (day 9) sprays
+memos and calls in interns. Then round again, tougher.
 
 ### Upgrades
-68 of them (13 are chore-stage picks), in four rarities, each with its own logo: the classics (ricochet, piercing, multishot, homing, explosive
+68 of them (13 are chore-stage picks), in four rarities (the clipboard's colour), each with its own pen-drawn logo: the classics (ricochet, piercing, multishot, homing, explosive
 shots, chain lightning) and game-changers like Black Hole Binder (vortex shots), Office Romance (a dodge heart that
 charms a coworker), Blame Game (whoever hits you becomes everyone's target), Cubicle Ninja, Corner Office, Sticky
 Notes, Hostile Work Environment and Golden Handshake. See `src/data/perks.ts`.
@@ -91,13 +105,17 @@ src/
   world/Furniture.ts      furniture sprites + colliders, pushable chairs, runtime spawning
   world/Props.ts          shove-able desks and tables
   entities/               Player, Enemy (NPC + hostile + ally AI), Projectiles, Pickups
-  systems/                GameState (run + upgrades), Stations (chores/traps), Waves, Effects, Audio
+  systems/                GameState (run + upgrades), Stations (chores/traps, daily chore hosts), Waves, Effects,
+                          Audio, OfficeSfx (synthesised office sounds), Speakers (PA), Vision (line-of-sight
+                          shadows), Vault (the code-locked door)
   data/                   perks, weapons, enemies, day scaling, flavour text
-  ui/                     HTML/CSS overlay: HUD, menus, intro cards, mini-games, icons and perk logos (GSAP)
+  ui/                     HTML/CSS overlay: HUD, menus, intro cards, mini-games, icons and perk logos (GSAP);
+                          sketch.ts turns the icons into pen drawings for the clipboards
 tools/
   render-assets.mjs       renders the furniture sprites from Kenney 3D models (three.js, headless Edge)
   furniture-specs.mjs     what to render: models, recolours, composites, camera angle
-  playtest.mjs            headless smoke test with screenshots (full | combat | minis | stress | props)
+  playtest.mjs            headless smoke test with screenshots
+                          (full | combat | minis | stress | props | epress | ui | boss | hatchet | vault)
   analyze-music.mjs       loudness/tempo stats used to pick music loops
 public/assets/            runtime art, audio and the Jersey 10 font
 ```
@@ -114,6 +132,8 @@ All art is from [Kenney](https://kenney.nl) (CC0) unless noted.
 - **Floors and walls:** generated in code in `makeTileset()` in `BootScene.ts`.
 - **Music:** `public/assets/audio/music/lobby.mp3` (Crunch Time) and `fight.mp3` (the Downsizing) are the jam's own
   tracks; the title, review and game-over loops are Kenney's. File list: `MUSIC_FILES` in `src/systems/Audio.ts`.
+- **Office sounds** (desk bell, rubber stamp, cash register, PA chimes, punch clock, printer, applause, ringing
+  phone...) are synthesised at boot in `src/systems/OfficeSfx.ts`; no voice lines.
 - **UI colours and type:** `src/ui/theme.css` (office palette) and `index.html` (the Jersey 10 `@font-face`).
 
 ## Debug helpers
@@ -123,7 +143,7 @@ Open the browser console:
 ```js
 __HT.toFight()          // skip ahead to the fight
 __HT.give("binder", 2)  // grant upgrades (ids in src/data/perks.ts)
-__HT.day(5)             // jump to a day (5 = boss)
+__HT.day(3)             // jump to a day (3, 6, 9... = boss)
 __HT.god()              // invincible
 __HT.killAll()          // fire everyone
 __HT.perf(); __HT.prof() // frame cost overall / per system
@@ -131,7 +151,7 @@ __HT.perf(); __HT.prof() // frame cost overall / per system
 
 ## Credits
 
-Art, sound effects, voice lines and title/review/game-over music: Kenney.nl (CC0).
+Art, sound effects and title/review/game-over music: Kenney.nl (CC0). Office sound effects are synthesised in code.
 Furniture sprites rendered from Kenney's 3D kits (Furniture, Mini Arcade, Mini Market, Space, Space Station,
 Food, Survival, Factory). Font: Jersey 10 by Sarah Cadigan-Fried (SIL Open Font License).
 Motion: GSAP.

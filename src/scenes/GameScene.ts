@@ -16,17 +16,42 @@ import { Enemy } from "../entities/Enemy";
 import { Projectiles } from "../entities/Projectiles";
 import { Pickups } from "../entities/Pickups";
 import { CHORE_INFO, ChoreId, DayConfig, dayConfig } from "../data/days";
-import { EnemyType } from "../data/enemies";
+import { BOSS_INFO, ENEMIES, EnemyType } from "../data/enemies";
+import { buildOfficeSfx } from "../systems/OfficeSfx";
+import { Speakers } from "../systems/Speakers";
+import { Vision } from "../systems/Vision";
+import { Vault } from "../systems/Vault";
 import { COMBO_WORDS, FIRED_WORDS } from "../data/lines";
 import { PERK_BY_ID } from "../data/perks";
 import { PerkDef } from "../data/perks";
 import { FLOOR_INDEX, WALL_INDEX } from "./BootScene";
 import { ArrowMark, UI } from "../ui/UI";
-import { MiniHandle, openMini } from "../ui/Minigames";
+import { MiniHandle, MiniSfx, openMini } from "../ui/Minigames";
 import { WEAPONS, WEAPON_DEFS, WeaponId } from "../data/weapons";
 import { angleDiff, chance, clamp, damp, formatClock, lerp, pick, rand, shuffle, weightedPick } from "../util/math";
 
-export type Phase = "title" | "brief" | "crunch" | "review" | "announce" | "downsizing" | "dayclear" | "results" | "gameover";
+export type Phase = "title" | "lore" | "brief" | "crunch" | "review" | "announce" | "downsizing" | "dayclear" | "results" | "memo" | "gameover";
+
+/** Blast radius of the Cold Caller's desk phones. */
+const PHONE_R = 105;
+
+/** Shown once at the start of every run from the title screen. */
+const LORE = [
+  "You are the best employee this office has ever had.",
+  "You are also the most expensive.",
+  "This morning, management announced budget cuts.",
+  "Your salary alone could pay for five of your coworkers. They've done the math.",
+  "Do your chores. Survive 5 PM. Whatever happens, don't get fired."
+];
+
+/** The night-before memo line for each coworker type that shows up for the first time tomorrow. */
+const NEW_TYPE_MEMO: Partial<Record<EnemyType, string>> = {
+  robot: "Due to budget cuts, AI robots will be added to divide the workload.",
+  hr: "Due to budget cuts, HR Directors will be walking the floor. With riot shields.",
+  burnout: "Due to budget cuts, vacations are cancelled. Expect burnt-out employees.",
+  manager: "Due to budget cuts, middle managers will now manage you personally.",
+  fulltime: "Due to budget cuts, full-time staff are now competing for your salary."
+};
 
 type Keys = Record<"W" | "A" | "S" | "D" | "UP" | "DOWN" | "LEFT" | "RIGHT" | "SPACE" | "SHIFT" | "E" | "R" | "Q" | "F" | "ONE" | "TWO" | "THREE" | "ENTER" | "ESC" | "P" | "M", Phaser.Input.Keyboard.Key>;
 
@@ -67,6 +92,9 @@ export class GameScene extends Phaser.Scene {
   /** Bosses ignore drywall: they route straight through it and smash their way in. */
   flowBoss!: FlowField;
   ui!: UI;
+  speakers!: Speakers;
+  vision!: Vision;
+  vault!: Vault;
 
   phase: Phase = "title";
   dayCfg: DayConfig = dayConfig(1);
@@ -145,6 +173,14 @@ export class GameScene extends Phaser.Scene {
   private drones: { img: Phaser.GameObjects.Image; x: number; y: number; cd: number; bob: number }[] = [];
   private sprinklerT = 0;
   private sprinklerAt = { x: 0, y: 0 };
+  /** Floor telegraphs (boss charge lanes, phone blast rings), redrawn every frame. */
+  private teleGfx!: Phaser.GameObjects.Graphics;
+  /** Desk phones ringing on the floor, about to go off. */
+  private phoneBombs: { x: number; y: number; fuse: number; ring: number; img: Phaser.GameObjects.Image; owner: Enemy | null }[] = [];
+  /** Furniture the Hatchet Man went straight through (put back overnight). */
+  private wrecked: FurnObj[] = [];
+  /** The camera looks here instead of at the boss (the PA speaker during the 5 PM announcement). */
+  private camFocus: { x: number; y: number } | null = null;
 
   constructor() {
     super("Game");
@@ -155,6 +191,7 @@ export class GameScene extends Phaser.Scene {
     this.map = buildOffice();
     this.world = new World(this.map);
     this.audio = new AudioManager(this);
+    this.audio.addGroups(buildOfficeSfx(this));
     this.fx = new Effects(this);
     this.buildTilemap();
     const built = buildFurniture(this, this.map, this.world);
@@ -173,6 +210,10 @@ export class GameScene extends Phaser.Scene {
     this.props = new Props(this, this.furniture, new Set(this.stations.list.map((s) => s.furn).filter((f): f is NonNullable<typeof f> => !!f)));
     this.waves = new Waves(this);
     this.player = new Player(this, this.map.playerSpawn.x, this.map.playerSpawn.y);
+    this.speakers = new Speakers(this);
+    this.vision = new Vision(this);
+    this.vault = new Vault(this);
+    this.teleGfx = this.add.graphics().setDepth(DEPTH.MARKER + 5);
 
     this.laserGfx = this.add.graphics().setDepth(DEPTH.PROJECTILE + 2).setBlendMode(Phaser.BlendModes.ADD);
     this.chainGfx = this.add.graphics().setDepth(DEPTH.PROJECTILE + 3).setBlendMode(Phaser.BlendModes.ADD);
@@ -194,8 +235,10 @@ export class GameScene extends Phaser.Scene {
     this.ui.sfx = (s) => {
       if (s === "hover") this.audio.play("hover", { vol: 0.22, minGap: 40 });
       else if (s === "click") this.audio.play("click", { vol: 0.5 });
-      else if (s === "deal") this.audio.play("paper", { vol: 0.3, rate: 1.2, jitter: 0.15, minGap: 50 });
-      else this.audio.play("drop", { vol: 0.6 });
+      else if (s === "deal") this.audio.play("slide", { vol: 0.35, jitter: 0.15, minGap: 50 });
+      else if (s === "note") this.audio.play("sticky", { vol: 0.35, minGap: 120 });
+      else if (s === "type") this.audio.play("type", { vol: 0.3, minGap: 28 });
+      else this.audio.play("stamp", { vol: 0.75 });
     };
     this.ui.initMinimap(this.map, this.world);
     this.ui.hideBoot(() => this.audio.play("select", { vol: 0.5 }));
@@ -216,7 +259,8 @@ export class GameScene extends Phaser.Scene {
       phase: () => this.phase,
       prof: () => Object.fromEntries(Object.entries(this.prof).map(([k, v]) => [k, +v.toFixed(2)])),
       perf: () => ({ updateMs: +this.perfMs.toFixed(2), fps: Math.round(this.game.loop.actualFps), enemies: this.enemies.length, projectiles: this.projectiles.list.filter((p) => p.active).length }),
-      tp: (x: number, y: number) => { this.player.x = x; this.player.y = y; }
+      tp: (x: number, y: number) => { this.player.x = x; this.player.y = y; },
+      dayConfig: (d: number) => dayConfig(d)
     };
 
     this.enterTitle();
@@ -241,8 +285,12 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private placeWallTile(x: number, y: number) {
+  placeWallTile(x: number, y: number) {
     const t = this.world.tile(x, y);
+    if (t === Tile.LOCKED) {
+      this.wallLayer.putTileAt(this.world.tile(x - 1, y) === Tile.LOCKED ? WALL_INDEX.VAULT_R : WALL_INDEX.VAULT_L, x, y);
+      return;
+    }
     const below = this.world.tile(x, y + 1) === Tile.FLOOR;
     let idx: number = WALL_INDEX.CAP;
     if (t === Tile.WALL) {
@@ -253,6 +301,17 @@ export class GameScene extends Phaser.Scene {
     else if (t === Tile.ELEVATOR) idx = this.map.spawns.some((s) => s.kind === "elevator" && s.doorTx === x) ? WALL_INDEX.ELEV_L : WALL_INDEX.ELEV_R;
     else if (t === Tile.EXIT_DOOR) idx = this.map.spawns.some((s) => s.kind === "exit" && s.doorTx === x) ? WALL_INDEX.EXIT_L : WALL_INDEX.EXIT_R;
     this.wallLayer.putTileAt(idx, x, y);
+  }
+
+  /** A wall tile became floor (the locked door opened). */
+  clearWallTile(x: number, y: number) {
+    this.wallLayer.removeTileAt(x, y);
+    if (this.world.tile(x, y - 1) !== Tile.FLOOR) this.placeWallTile(x, y - 1);
+  }
+
+  /** The floor plan changed: enemies re-plan their routes. */
+  refreshNav() {
+    this.flowTile = -1;
   }
 
   private setupInput() {
@@ -285,13 +344,13 @@ export class GameScene extends Phaser.Scene {
     this.resetWorldForDay(1);
     this.player.sprite.setVisible(false);
     this.player.shadow.setVisible(false);
-    this.spawnNpcs(10);
+    this.spawnNpcs(14);
     this.ui.setHudMode("none");
     this.audio.setMusic("title");
     const best = this.loadBest();
     const go = () => {
       this.ui.closeScreen("title");
-      this.startRun();
+      this.showLore(() => this.startRun());
     };
     this.ui.showTitle(best ? `BEST: SURVIVED ${best.days} DAY${best.days === 1 ? "" : "S"} · ${best.fired} FIRED` : "", { play: go, tutorial: go });
   }
@@ -301,8 +360,31 @@ export class GameScene extends Phaser.Scene {
     this.startDay(1);
   }
 
-  private resetWorldForDay(day: number) {
-    this.dayCfg = dayConfig(day, day > 1 ? this.dayCfg.chores : undefined);
+  /** Who you are, and why the whole office is about to come after you. */
+  private showLore(then: () => void) {
+    this.phase = "lore";
+    this.ui.setHudMode("none");
+    this.audio.setMusic("none", 0.6);
+    this.ui.showLore(LORE, () => {
+      this.ui.closeScreen("lore");
+      then();
+    });
+  }
+
+  private resetWorldForDay(day: number, cfg?: DayConfig) {
+    this.dayCfg = cfg ?? dayConfig(day, day > 1 ? this.dayCfg.chores : undefined);
+    this.speakers.cancel();
+    this.vision.reset();
+    this.camFocus = null;
+    this.clearPhoneBombs();
+    this.teleGfx.clear();
+    // The Hatchet Man's mess is cleaned up overnight.
+    for (const f of this.wrecked) {
+      f.destroyed = false;
+      f.sprite.setVisible(true);
+      if (f.collider) this.world.moveCollider(f.collider, f.x - f.w / 2, f.y - f.h / 2, f.x + f.w / 2, f.y + f.h / 2);
+    }
+    this.wrecked = [];
     for (const e of this.enemies) e.destroy();
     this.enemies = [];
     this.projectiles.clear();
@@ -325,6 +407,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.world.rebuildNav();
     this.props.reset();
+    this.vault.setupDay(this.dayCfg.chores);
     this.stations.randomizeProps();
     for (const h of this.hearts) h.sprite.destroy();
     this.hearts = [];
@@ -344,7 +427,7 @@ export class GameScene extends Phaser.Scene {
     p.dead = false;
     p.invuln = p.stun = p.rolling = p.slip = 0;
     p.tempHp = 0;
-    p.shredBag = GameState.stats.kindling ? 40 : 0;
+    p.shredBag = 0;
     p.dayMagBonus = p.dayCupBonus = 0;
     p.weapon = "stapler";
     p.setArmed(false);
@@ -363,10 +446,10 @@ export class GameScene extends Phaser.Scene {
     this.camY = p.y;
   }
 
-  startDay(day: number) {
+  startDay(day: number, cfg?: DayConfig) {
     GameState.day = day;
     if (day > 1) GameState.newDay();
-    this.resetWorldForDay(day);
+    this.resetWorldForDay(day, cfg);
     this.ui.initMinimap(this.map, this.world);
     this.spawnNpcs(this.dayCfg.npcs);
     this.crunchTotal = GameState.crunchSeconds();
@@ -392,9 +475,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnNpcs(n: number) {
-    const homes = shuffle([...this.map.npcHomes]).slice(0, n);
+    // Nobody sits in the code-locked room (they'd be stuck there at 5 PM).
+    const locked = this.vault.room ? this.map.zones.find((z) => z.name === this.vault.room!.name) : undefined;
+    const free = locked ? this.map.npcHomes.filter((h) => {
+      const tx = Math.floor(h.x / TILE), ty = Math.floor(h.y / TILE);
+      return tx < locked.x0 || tx > locked.x1 || ty < locked.y0 || ty > locked.y1;
+    }) : this.map.npcHomes;
+    const homes = shuffle([...free]).slice(0, n);
     const weights = Object.entries(this.dayCfg.weights)
-      .filter(([t]) => t !== "consultant")
+      .filter(([t]) => !ENEMIES[t as EnemyType].boss)
       .map(([t, w]) => ({ item: t as EnemyType, w: t === "hr" ? (w as number) * 0.4 : (w as number) }));
     for (const h of homes) {
       const type = weightedPick(weights);
@@ -417,7 +506,7 @@ export class GameScene extends Phaser.Scene {
     const left = this.crunchLeft;
     if (left <= 20 && !this.hurryVoiced) {
       this.hurryVoiced = true;
-      this.audio.voice("hurry_up", 0.8);
+      this.speakers.say(["Twenty seconds to five o'clock."], { chime: "down" });
       this.audio.setMusicRate(1.08);
     }
     if (left <= 10) {
@@ -455,15 +544,51 @@ export class GameScene extends Phaser.Scene {
     this.zoomMini();
     this.mini = openMini(this.ui.root, {
       chore, title: CHORE_INFO[chore].label, len,
-      sfx: (n) => {
-        if (n === "good") this.audio.play("confirm", { vol: 0.35, jitter: 0.1 });
-        else if (n === "bad") this.audio.play("soft_heavy", { vol: 0.4 });
-        else if (n === "win") this.audio.play("powerup", { vol: 0.4 });
-        else this.audio.play("click", { vol: 0.25, minGap: 60 });
-      },
+      note: this.vault.noteFor(chore) ?? undefined,
+      penalty: "-1s",
+      sfx: (n) => this.miniSfx(n),
       onDone: () => { this.mini = null; this.unzoomMini(); this.input.keyboard?.resetKeys(); onDone(); },
       onCancel: () => { this.mini = null; this.unzoomMini(); this.input.keyboard?.resetKeys(); this.pressed.clear(); }
     });
+  }
+
+  /** Mini-game sounds; a mistake costs a second of Crunch Time. */
+  private miniSfx(n: MiniSfx) {
+    if (n === "good") this.audio.play("confirm", { vol: 0.35, jitter: 0.1 });
+    else if (n === "bad") {
+      this.audio.play("err", { vol: 0.55, jitter: 0 });
+      if (this.phase === "crunch") {
+        this.crunchLeft = Math.max(0, this.crunchLeft - 1);
+        this.ui.penalty("-1s");
+      }
+    } else if (n === "win") {
+      this.audio.play("bell", { vol: 0.5, jitter: 0 });
+      this.audio.play("stamp", { vol: 0.5 });
+    } else if (n === "note") this.audio.play("sticky", { vol: 0.5 });
+    else if (n.startsWith("dtmf_")) this.audio.play(n, { vol: 0.4, jitter: 0 });
+    else this.audio.play("click", { vol: 0.25, minGap: 60 });
+  }
+
+  /** The code-locked door's keypad (Crunch Time only). */
+  startKeypad(code: number[], known: (number | null)[], onOpen: () => void) {
+    if (this.mini || this.phase !== "crunch") return;
+    this.ui.setPrompt(null);
+    this.zoomMini();
+    this.mini = openMini(this.ui.root, {
+      chore: "keypad", title: `${this.vault.room?.name ?? "Door"} Keypad`, len: 1, code, known, penalty: "-1s",
+      sfx: (n) => this.miniSfx(n),
+      onDone: () => { this.mini = null; this.unzoomMini(); this.input.keyboard?.resetKeys(); onOpen(); },
+      onCancel: () => { this.mini = null; this.unzoomMini(); this.input.keyboard?.resetKeys(); this.pressed.clear(); }
+    });
+  }
+
+  /** The golden briefcase had a gun in it: in your hand at the next fight (or right now). */
+  giftWeapon(w: WeaponId) {
+    if (this.phase === "downsizing") {
+      this.player.weapon = w;
+      this.player.refill();
+    } else if (!this.newWeapon) this.newWeapon = w;
+    this.unlockBanner(WEAPON_DEFS[w].name, WEAPON_DEFS[w].desc, w);
   }
 
   /** Lean the camera in on the task while a mini-game is open. */
@@ -490,15 +615,18 @@ export class GameScene extends Phaser.Scene {
     if (this.choresDone.has(c)) return;
     this.choresDone.add(c);
     if (this.dayCfg.chores.includes(c)) GameState.dayStats.choresDone++;
-    this.audio.jingle("jingle_chore", 0.5);
-    this.audio.play("confirm", { vol: 0.5 });
+    this.audio.play("stamp", { vol: 0.6 });
     this.fx.text(this.player.x, this.player.y - 40, "DONE!", { color: "#4b9a63", size: 20, pop: true });
-    if (this.dayCfg.chores.includes(c) && this.allChoresDone()) this.audio.voice("objective_achieved", 0.7);
+    this.vault.collect(c);
+    if (this.dayCfg.chores.includes(c) && this.allChoresDone()) {
+      this.audio.play("bell2", { vol: 0.55, jitter: 0 });
+      this.ui.toast("All chores done! Press ENTER to clock out early.", "#4b9a63", 3.2);
+    }
   }
 
   unlockBanner(name: string, desc: string, weapon?: WeaponId) {
     this.ui.unlock(name, desc, weapon, weapon ? WEAPON_DEFS[weapon].color : undefined);
-    this.audio.play("levelup", { vol: 0.6 });
+    this.audio.play("chime_up", { vol: 0.5, jitter: 0 });
   }
 
   private endCrunch(early: boolean) {
@@ -515,7 +643,7 @@ export class GameScene extends Phaser.Scene {
     this.quota = this.dayCfg.quota + missed.length * 2;
     this.reviewNotes = [];
     if (early) this.reviewNotes.push({ text: `+${leftover}s for clocking out early (half rate)`, kind: "good" });
-    else this.audio.voice("time_over", 0.8);
+    this.audio.play("punch", { vol: 0.75, jitter: 0 });
     if (choreBonus) this.reviewNotes.push({ text: `+${choreBonus}s chore bonus (${this.choresDone.size} done)`, kind: "good" });
     if (missed.length) this.reviewNotes.push({ text: `${missed.length} missed deadline${missed.length > 1 ? "s" : ""}: +${missed.length * 2} to today's firing quota`, kind: "bad" });
     this.reviewNotes.push({ text: `Today's quota: ${this.quota} employees`, kind: "" });
@@ -538,11 +666,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Upgrades are scarce on purpose: three offers at a markup (one guaranteed epic or better),
-   * so a good day buys one and a great day two.
+   * Upgrades are scarce on purpose: three offers at a markup (one guaranteed rare or better;
+   * epics are a treat), so a good day buys one and a great day two.
    */
   private rollShop() {
-    return GameState.rollSlots(["common", "rare", "epic"]).map((perk) => ({ perk: { ...perk, cost: Math.ceil(perk.cost * 1.5) }, sold: false }));
+    return GameState.rollSlots(["common", "common", "rare"]).map((perk) => ({ perk: { ...perk, cost: Math.ceil(perk.cost * 1.5) }, sold: false }));
   }
 
   private renderReview() {
@@ -566,8 +694,8 @@ export class GameScene extends Phaser.Scene {
         GameState.unlocked[g.id] = true;
         g.sold = true;
         this.newWeapon = g.id;
-        this.audio.play("reload_done", { vol: 0.7 });
-        this.audio.play("powerup", { vol: 0.5 });
+        this.audio.play("register", { vol: 0.7, jitter: 0 });
+        this.audio.play("reload_done", { vol: 0.5 });
         this.renderReview();
       },
       buy: (i) => {
@@ -576,7 +704,7 @@ export class GameScene extends Phaser.Scene {
         GameState.bank -= o.perk.cost;
         GameState.addPerk(o.perk.id);
         o.sold = true;
-        this.audio.play("powerup", { vol: 0.6 });
+        this.audio.play("register", { vol: 0.7, jitter: 0 });
         this.renderReview();
       },
       heal: () => {
@@ -590,7 +718,7 @@ export class GameScene extends Phaser.Scene {
         if (GameState.bank < rerollCost) return;
         GameState.bank -= rerollCost;
         this.reviewOffers = this.rollShop();
-        this.audio.play("select", { vol: 0.5 });
+        this.audio.play("paper", { vol: 0.5 });
         this.renderReview();
       },
       go: () => {
@@ -617,24 +745,30 @@ export class GameScene extends Phaser.Scene {
       step();
       this.audio.play("glitch", { vol: 0.5 });
     };
-    this.audio.play("alert", { vol: 0.7 });
     this.audio.play("powerdown", { vol: 0.6 });
-    at(200, () => type(0, "BUDGET CUTS HAVE BEEN MADE."));
-    at(1400, () => { type(1, "DOWNSIZING HAS BEGUN."); this.audio.play("alert", { vol: 0.6 }); });
-    at(2600, () => {
+    // The camera finds the nearest PA speaker; the lines are read out over it.
+    const sp = this.speakers.nearest(this.player.x, this.player.y);
+    // Frame it in the top third, clear of the announcement text.
+    if (sp) this.camFocus = { x: sp.x, y: sp.y + (this.scale.height / this.cameras.main.zoom) * 0.2 };
+    at(1300, () => type(0, "BUDGET CUTS HAVE BEEN MADE."));
+    at(3300, () => type(1, "DOWNSIZING HAS BEGUN."));
+    at(5200, () => {
       type(2, `${this.quota} WILL BE FIRED BY THE END OF TODAY.`, "red");
       for (const e of this.enemies) {
         if (e.mode !== "npc") continue;
         e.sprite.setTint(0xd0574a);
         this.fx.text(e.x, e.y - 34, "!", { color: "#c4382c", size: 30, pop: true, dur: 1.4 });
       }
-      this.audio.voice("prepare_yourself", 0.9);
+      this.audio.play("alert", { vol: 0.6 });
     });
-    at(4000, () => {
-      type(3, "GOOD LUCK.", "huge");
-      this.audio.voice(`round_${Math.min(5, GameState.day)}`, 0.9);
+    at(7600, () => type(3, "GOOD LUCK.", "huge"));
+    this.speakers.say([
+      "Attention all staff. Due to budget cuts, downsizing has begun.",
+      `${this.quota} employees will be let go by the end of today. Good luck.`
+    ], { chime: "down", caption: false }).then(() => {
+      if (this.phase === "announce") at(500, () => this.toFight());
     });
-    at(5300, () => this.toFight());
+    at(16000, () => this.toFight());
   }
 
   private skipAnnounce() {
@@ -644,9 +778,11 @@ export class GameScene extends Phaser.Scene {
 
   /** End of the 5 PM speech: the first time, explain the fight before it starts. */
   private toFight() {
-    if (this.briefing) return;
+    if (this.briefing || this.phase !== "announce") return;
     for (const t of this.announceTimers) t.remove(false);
     this.announceTimers = [];
+    this.speakers.cancel();
+    this.camFocus = null;
     this.ui.closeScreen("announce");
     this.briefing = true;
     this.ui.brief("downsizing", () => {
@@ -683,7 +819,10 @@ export class GameScene extends Phaser.Scene {
     }
     if (GameState.stats.prepShield) this.player.tempHp = Math.max(this.player.tempHp, GameState.stats.prepShield * 2);
     this.audio.setMusic("fight", 0.2);
-    this.audio.voice("fight", 1);
+    this.audio.play("bell2", { vol: 0.6, rate: 0.72, jitter: 0 });
+    // Lights out: from now on walls block your view.
+    this.vision.target = 1;
+    this.time.delayedCall(2600, () => this.tipOnce("vision", "The lights are out. Walls block your view, windows don't.", "#9fd8ff"));
     this.ui.setDusk(0);
     this.ui.setHudMode("fight");
     this.ui.flash("#ff2040", 260, 0.5);
@@ -727,7 +866,7 @@ export class GameScene extends Phaser.Scene {
     this.updateHearts(dt);
     this.updateVortices(dt);
     const bossAlive = this.waves.boss && !this.waves.boss.dead;
-    if (this.waves.boss && !this.waves.boss.dead) this.ui.setBoss("THE CONSULTANT", this.waves.boss.hp / this.waves.boss.maxHp);
+    if (this.waves.boss && !this.waves.boss.dead) this.ui.setBoss(this.waves.boss.def.title, this.waves.boss.hp / this.waves.boss.maxHp);
     else this.ui.setBoss(null, 0);
     if (this.fired >= this.quota && !bossAlive) this.dayClear();
   }
@@ -740,8 +879,11 @@ export class GameScene extends Phaser.Scene {
     this.laserGfx.clear();
     for (const p of this.projectiles.list) if (p.active && !p.friendly) p.range = 0;
     const flawless = GameState.dayStats.damageTaken === 0;
-    this.audio.voice(flawless ? "flawless_victory" : "you_win", 0.95);
-    this.audio.jingle("jingle_win", 0.7);
+    this.clearPhoneBombs();
+    this.vision.target = 0;
+    this.audio.play("punch", { vol: 0.8, jitter: 0 });
+    this.time.delayedCall(350, () => this.audio.play("applause", { vol: 0.65, jitter: 0 }));
+    if (flawless) this.time.delayedCall(700, () => this.audio.play("bell2", { vol: 0.5, jitter: 0 }));
     this.audio.setMusic("none", 1.5);
     this.ui.banner("QUOTA MET", flawless ? "FLAWLESS. NOT A SCRATCH." : `Day ${GameState.day} survived`, "#e9c25a", 2.4);
     this.ui.flash("#ffffff", 400, 0.5);
@@ -773,11 +915,43 @@ export class GameScene extends Phaser.Scene {
     }, picks, GameState.stacks, (i) => {
       const p = picks[i];
       if (p) GameState.addPerk(p.id);
-      this.audio.play("powerup", { vol: 0.7 });
-      this.audio.voice("power_up", 0.7);
+      this.audio.play("bell", { vol: 0.5, jitter: 0 });
       this.ui.closeScreen("results");
-      this.startDay(GameState.day + 1);
+      this.endOfDayMemo();
     });
+  }
+
+  /** Before the next day: management's memo about what's harder tomorrow, read out over the PA. */
+  private endOfDayMemo() {
+    const today = this.dayCfg;
+    const next = dayConfig(GameState.day + 1, today.chores);
+    const lines = this.memoLines(today, next);
+    this.phase = "memo";
+    this.ui.setHudMode("none");
+    this.ui.showMemo({ day: next.day, lines }, () => {
+      this.speakers.cancel();
+      this.ui.closeScreen("memo");
+      this.startDay(next.day, next);
+    });
+    this.speakers.say(lines.slice(0, 2), { chime: "down", caption: false });
+  }
+
+  private memoLines(today: DayConfig, next: DayConfig): string[] {
+    const out: string[] = [];
+    if (next.boss) {
+      const kind = ENEMIES[next.bossType].bossKind;
+      if (kind) out.push(BOSS_INFO[kind].memo);
+    }
+    const order: EnemyType[] = ["robot", "hr", "burnout", "manager", "fulltime"];
+    for (const t of order) {
+      if (out.length >= 2) break;
+      if (next.weights[t] && !today.weights[t] && NEW_TYPE_MEMO[t]) out.push(NEW_TYPE_MEMO[t]!);
+    }
+    if (next.growth === "more") out.push("Due to budget cuts, you'll be covering one more chore.");
+    else if (next.growth === "longer") out.push("Due to budget cuts, every chore will take a little longer.");
+    if (out.length < 3 && next.spawnEvery < today.spawnEvery) out.push("Due to budget cuts, the elevators will be running more often.");
+    out.push(`Tomorrow's firing quota: ${next.quota} employees (+${next.quota - today.quota}).`);
+    return out.slice(0, 4);
   }
 
   private gameOver() {
@@ -789,8 +963,10 @@ export class GameScene extends Phaser.Scene {
     this.player.sprite.setTint(0x888888);
     this.fx.decal(this.player.x, this.player.y + 8, "furn_belongings", { scale: 1.2, rot: 0 });
     this.fx.burst("confetti", this.player.x, this.player.y, 30);
-    this.audio.voice("game_over", 1);
-    this.audio.jingle("jingle_lose", 0.6);
+    this.clearPhoneBombs();
+    this.vision.target = 0;
+    this.audio.play("printer", { vol: 0.7, jitter: 0 });
+    this.time.delayedCall(900, () => this.audio.play("chime_down", { vol: 0.45, jitter: 0 }));
     this.audio.setMusic("gameover", 1.2);
     this.ui.setHudMode("none");
     this.ui.setCombo(0, "");
@@ -819,7 +995,7 @@ export class GameScene extends Phaser.Scene {
         this.ui.closeScreen("gameover");
         this.enterTitle();
       });
-      if (newBest) this.audio.voice("new_highscore", 0.8);
+      if (newBest) this.audio.play("chime_up", { vol: 0.55, jitter: 0 });
     });
   }
 
@@ -833,6 +1009,15 @@ export class GameScene extends Phaser.Scene {
   // ================================================================ interaction
   private handleInteraction(dt: number) {
     const p = this.player;
+    const door = p.rolling > 0 ? null : this.vault.near(p.x, p.y);
+    if (door) {
+      this.interactTarget = null;
+      this.interactProgress = 0;
+      if (this.pressed.has("KeyE") && p.stun <= 0) this.vault.use();
+      const cam = this.cameras.main;
+      this.ui.setPrompt({ x: (door.x - cam.worldView.x) * cam.zoom, y: (door.y - cam.worldView.y) * cam.zoom, label: door.label, kind: "chore", progress: 0 });
+      return;
+    }
     const near = p.rolling > 0 ? null : this.stations.nearest(p.x, p.y);
     if (!near) {
       this.interactTarget = null;
@@ -869,10 +1054,6 @@ export class GameScene extends Phaser.Scene {
       const sx = ((s.box.x0 + s.box.x1) / 2 - this.cameras.main.worldView.x) * this.cameras.main.zoom;
       const sy = (s.box.y0 - 22 - this.cameras.main.worldView.y) * this.cameras.main.zoom;
       this.ui.setPrompt({ x: sx, y: sy, label: near.action.label, kind: near.action.kind, progress: this.interactProgress });
-    }
-    if (this.pressed.has("KeyF") && p.shredBag > 0) {
-      p.toggleDropPaper();
-      this.audio.play("switch", { vol: 0.4 });
     }
   }
 
@@ -1022,7 +1203,9 @@ export class GameScene extends Phaser.Scene {
       this.explosion(x, y, 240, 150, { friendly: true });
       this.fx.slowmo(0.25, 1.4);
       this.ui.flash("#e9c25a", 500, 0.6);
-      this.audio.voice("winner", 0.9);
+      this.audio.play("applause", { vol: 0.7, jitter: 0 });
+      this.audio.play("bell2", { vol: 0.55, jitter: 0 });
+      this.speakers.say(["Attention all staff. That position has been eliminated."], { chime: "up" });
       for (let k = 0; k < 4; k++) this.pickups.spawn(k === 0 ? "pizza" : "donut", x, y);
     }
 
@@ -1031,8 +1214,9 @@ export class GameScene extends Phaser.Scene {
     this.comboTimer = 2.6;
     GameState.dayStats.bestCombo = Math.max(GameState.dayStats.bestCombo, this.combo);
     if (this.combo >= 2) this.ui.setCombo(this.combo, COMBO_WORDS[Math.min(this.combo, COMBO_WORDS.length - 1)]);
-    if (this.combo === 4 && !this.comboVoiced) { this.comboVoiced = true; this.audio.voice("multi_kill", 0.8); }
-    if (this.combo === 8) this.audio.voice("combo", 0.8);
+    // Cost savings! A cash register for every big streak.
+    if (this.combo === 4 && !this.comboVoiced) { this.comboVoiced = true; this.audio.play("register", { vol: 0.6, jitter: 0 }); }
+    if (this.combo === 8 || this.combo === 12) this.audio.play("register", { vol: 0.7, rate: 1.08, jitter: 0 });
     if (st.bulletTime && this.combo === 5 && this.bulletTimeCd <= 0) {
       this.bulletTimeCd = 12;
       this.fx.slowmo(0.45, 1.6);
@@ -1277,8 +1461,8 @@ export class GameScene extends Phaser.Scene {
     this.fx.text(p.x, p.y - 60, "GOLDEN PARACHUTE!", { color: "#e9c25a", size: 28, pop: true, dur: 2 });
     this.ui.flash("#e9c25a", 600, 0.7);
     this.fx.slowmo(0.3, 1.2);
-    this.audio.voice("level_up", 0.9);
-    this.audio.play("upgrade", { vol: 0.7 });
+    this.audio.play("chime_up", { vol: 0.6, jitter: 0 });
+    this.audio.play("bell2", { vol: 0.5, jitter: 0 });
     for (const e of [...this.enemies]) {
       if (!e.hostile || e.dead) continue;
       const d = Math.hypot(e.x - p.x, e.y - p.y);
@@ -1286,11 +1470,160 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  bossIncoming() {
-    this.ui.banner("THE CONSULTANT", "has been brought in to 'optimize headcount'", "#e9c25a", 3);
-    this.audio.play("alert", { vol: 0.8 });
-    this.audio.voice("final_round", 0.9);
+  bossIncoming(type: EnemyType) {
+    const def = ENEMIES[type];
+    const info = BOSS_INFO[def.bossKind ?? "consultant"];
+    this.ui.banner(def.title, info.sub, "#e9c25a", 3);
+    this.audio.play("alert", { vol: 0.6 });
+    this.speakers.say([info.pa], { chime: "down" });
     this.fx.shake(0.5);
+  }
+
+  // ================================================================ boss toys
+  /** A red lane on the floor where the Hatchet Man is about to charge (brighter as he commits). */
+  drawChargeLane(x: number, y: number, a: number, r: number, f: number) {
+    const g = this.teleGfx;
+    const len = 900, w = r * 1.1;
+    const c = Math.cos(a), s = Math.sin(a), nx = -s * w, ny = c * w;
+    const ex = x + c * len, ey = y + s * len;
+    g.fillStyle(0xc4382c, 0.08 + 0.2 * f);
+    g.fillPoints([{ x: x + nx, y: y + ny }, { x: ex + nx, y: ey + ny }, { x: ex - nx, y: ey - ny }, { x: x - nx, y: y - ny }], true);
+    g.lineStyle(3, 0xff6a55, 0.25 + 0.5 * f);
+    g.lineBetween(x + nx, y + ny, ex + nx, ey + ny);
+    g.lineBetween(x - nx, y - ny, ex - nx, ey - ny);
+    for (let k = 1; k <= 4; k++) {
+      const d = ((k / 4) * len + this.time.now * 0.6 * f) % len;
+      const px = x + c * d, py = y + s * d;
+      g.lineStyle(4, 0xff6a55, 0.4 * f);
+      g.lineBetween(px + nx * 0.6 - c * 18, py + ny * 0.6 - s * 18, px + c * 6, py + s * 6);
+      g.lineBetween(px - nx * 0.6 - c * 18, py - ny * 0.6 - s * 18, px + c * 6, py + s * 6);
+    }
+  }
+
+  /** A charging boss hits whatever is ahead of it: drywall, glass, furniture, traps. */
+  bossSmash(e: Enemy, x: number, y: number, r: number) {
+    this.smashWalls(x, y, r);
+    const tr = Math.ceil(r / TILE) + 1, cx = Math.floor(x / TILE), cy = Math.floor(y / TILE);
+    for (let ty = cy - tr; ty <= cy + tr; ty++) for (let tx = cx - tr; tx <= cx + tr; tx++) {
+      if (this.world.tile(tx, ty) !== Tile.GLASS) continue;
+      const nx = clamp(x, tx * TILE, (tx + 1) * TILE), ny = clamp(y, ty * TILE, (ty + 1) * TILE);
+      if ((nx - x) ** 2 + (ny - y) ** 2 < r * r) this.damageGlass(tx, ty, 99);
+    }
+    const hits: FurnObj[] = [];
+    this.world.queryBox(x - r, y - r, x + r, y + r, (c) => {
+      if (!c.alive || !c.solid) return;
+      const f = c.ref as FurnObj | undefined;
+      if (f && !hits.includes(f)) hits.push(f);
+    });
+    for (const f of hits) {
+      const st = this.stations.list.find((s) => s.furn === f);
+      if (st) {
+        // Machines are heavy: he slams into them. Some of them go off.
+        if (st.def.kind === "copier" && !st.wrecked) this.stations.detonate(st);
+        else if (st.def.kind === "cooler" && !st.used) this.stations.kickCooler(st);
+        continue;
+      }
+      if (this.props.launch(f, e.vx * 1.15, e.vy * 1.15, e)) continue;
+      this.wreckFurniture(f);
+    }
+    for (const c of this.chairs) {
+      if ((c.x - x) ** 2 + (c.y - y) ** 2 > (r + 26) ** 2) continue;
+      c.vx += e.vx * 1.2;
+      c.vy += e.vy * 1.2;
+      c.spin += rand(-20, 20);
+    }
+  }
+
+  /** Splinters: the furniture is gone until the cleaners come overnight. */
+  wreckFurniture(f: FurnObj) {
+    if (f.destroyed || !f.collider) return;
+    f.destroyed = true;
+    f.sprite.setVisible(false);
+    this.world.moveCollider(f.collider, -9999, -9999, -9990, -9990);
+    this.wrecked.push(f);
+    this.fx.burst("pixel", f.x, f.y, 22, [0xd8c3a5, 0x8a5a33, 0x5b6380]);
+    this.fx.burst("smoke", f.x, f.y, 4, 0xd8c3a5);
+    this.fx.decal(f.x, f.y, "rubble", { scale: Math.min(1.4, Math.max(0.6, f.w / 90)), alpha: 0.9, tint: 0xb59a7a });
+    this.audio.play("wood_heavy", { vol: 0.7, minGap: 60 });
+    this.audio.play("crunch", { vol: 0.5, minGap: 60 });
+    this.world.rebuildNav();
+    this.refreshNav();
+  }
+
+  /** A thrown desk phone lands: it rings on the floor, then goes off. Swatted-back phones go off at once. */
+  phoneLanded(x: number, y: number, friendly: boolean, owner: Enemy | null) {
+    if (friendly) { this.phoneBlast(x, y, true, null); return; }
+    const img = this.add.image(x, y, "i_phone").setDepth(y + 3).setScale(1.15);
+    this.phoneBombs.push({ x, y, fuse: 1.05, ring: 0, img, owner });
+    this.fx.burst("smoke", x, y + 6, 2, 0xd8c3a5);
+  }
+
+  private updatePhoneBombs(dt: number) {
+    const g = this.teleGfx;
+    for (let i = this.phoneBombs.length - 1; i >= 0; i--) {
+      const b = this.phoneBombs[i];
+      b.fuse -= dt;
+      b.ring -= dt;
+      if (b.ring <= 0) {
+        b.ring = 0.5;
+        this.audio.play("phone", { vol: 0.5, minGap: 90 });
+        this.fx.text(b.x, b.y - 30, "RING!", { color: "#e9c25a", size: 13, dur: 0.45, rise: 30 });
+      }
+      b.img.setPosition(b.x + rand(-2, 2), b.y + rand(-1.5, 1.5)).setRotation(Math.sin(this.time.now / 25) * 0.15);
+      const f = 1 - Math.max(0, b.fuse) / 1.05;
+      const blink = Math.sin(this.time.now / (90 - 60 * f)) > 0 ? 1 : 0.55;
+      g.fillStyle(0xc4382c, (0.06 + 0.14 * f) * blink);
+      g.fillCircle(b.x, b.y, PHONE_R);
+      g.lineStyle(3, 0xff6a55, (0.3 + 0.5 * f) * blink);
+      g.strokeCircle(b.x, b.y, PHONE_R);
+      g.strokeCircle(b.x, b.y, PHONE_R * f);
+      if (b.fuse <= 0) {
+        b.img.destroy();
+        this.phoneBombs.splice(i, 1);
+        this.phoneBlast(b.x, b.y, false, b.owner);
+      }
+    }
+    // Where the phones in the air are going to land.
+    for (const p of this.projectiles.list) {
+      if (!p.active || p.kind !== "phone" || p.friendly) continue;
+      g.lineStyle(2, 0xff6a55, 0.55);
+      g.strokeCircle(p.tx, p.ty, PHONE_R);
+      g.fillStyle(0xc4382c, 0.06);
+      g.fillCircle(p.tx, p.ty, PHONE_R);
+    }
+  }
+
+  private phoneBlast(x: number, y: number, friendly: boolean, owner: Enemy | null) {
+    const R = PHONE_R;
+    this.fx.light(x, y, 0xd98a3a, R / 22, 0.25);
+    this.fx.burst("fire", x, y, 14);
+    this.fx.burst("smoke", x, y, 5);
+    this.fx.burst("pixel", x, y, 14, [0xe3d9c4, 0x1c1d21, 0xc4382c]);
+    this.fx.decal(x, y, "fx_scorch_02", { scale: R / 280, alpha: 0.55, tint: 0x111111 });
+    this.audio.play("boom", { vol: 0.6, rate: 1.15 });
+    this.fx.shake(0.35);
+    const pl = this.player;
+    if (!friendly && !pl.dead && pl.rolling <= 0 && (pl.x - x) ** 2 + (pl.y - y) ** 2 < (R + pl.r * 0.5) ** 2) {
+      pl.damage(2, x, y, "phone", owner ?? undefined);
+    }
+    for (const e of [...this.enemies]) {
+      if (e.dead || e.ally || e === owner || e.def.boss && !friendly) continue;
+      const d2 = (e.x - x) ** 2 + (e.y - y) ** 2;
+      if (d2 > (R + e.r) ** 2) continue;
+      const dmg = friendly ? 90 * GameState.stats.dmgMult : e.maxHp * 0.3;
+      this.hitEnemy(e, dmg, { angle: Math.atan2(e.y - y, e.x - x), kind: "explosion", x: e.x, y: e.y, knock: 300, silent: !friendly });
+    }
+    const tr = Math.ceil(R / TILE), cx = Math.floor(x / TILE), cy = Math.floor(y / TILE);
+    for (let ty = cy - tr; ty <= cy + tr; ty++) for (let tx = cx - tr; tx <= cx + tr; tx++) {
+      if (this.world.tile(tx, ty) === Tile.GLASS && ((tx + 0.5) * TILE - x) ** 2 + ((ty + 0.5) * TILE - y) ** 2 < R * R) this.damageGlass(tx, ty, 2);
+    }
+    this.hazards.igniteRadius(x, y, R * 0.45, 0.8);
+  }
+
+  private clearPhoneBombs() {
+    for (const b of this.phoneBombs) b.img.destroy();
+    this.phoneBombs = [];
+    for (const p of this.projectiles.list) if (p.active && p.kind === "phone" && !p.friendly) { p.active = false; p.sprite.setVisible(false); }
   }
 
   /** A ring blast from (x, y): damages, knocks back and stuns coworkers (never the player). */
@@ -1556,6 +1889,11 @@ export class GameScene extends Phaser.Scene {
       ty = WORLD_H / 2 + Math.sin(this.titleT * 0.11) * WORLD_H * 0.28;
       this.camX = damp(this.camX, tx, 0.6, dt);
       this.camY = damp(this.camY, ty, 0.6, dt);
+    } else if (this.camFocus) {
+      tx = this.camFocus.x;
+      ty = this.camFocus.y;
+      this.camX = damp(this.camX, tx, 3, dt);
+      this.camY = damp(this.camY, ty, 3, dt);
     } else {
       const p = this.player;
       const look = this.phase === "downsizing" ? 0.24 : 0.12;
@@ -1641,14 +1979,13 @@ export class GameScene extends Phaser.Scene {
     this.ui.setWeapons({
       armed: p.armed,
       active: p.weapon,
-      slots: WEAPONS.filter((w) => p.weaponUnlocked(w)).map((w) => ({ id: w, key: WEAPONS.indexOf(w) + 1, name: WEAPON_DEFS[w].name, color: WEAPON_DEFS[w].color, ...p.ammoFor(w) }))
+      slots: WEAPONS.filter((w) => p.weaponUnlocked(w)).map((w, i) => ({ id: w, key: i + 1, name: WEAPON_DEFS[w].name, color: WEAPON_DEFS[w].color, ...p.ammoFor(w) }))
     });
     this.ui.setDodge(p.dodgeCharges, st.dodgeCharges);
     this.ui.setPerks(GameState.stacks, PERK_BY_ID);
-    this.ui.setBag(p.shredBag, p.dropPaper);
     if (this.phase === "crunch") {
       this.ui.setClock(formatClock(Math.max(0, this.crunchLeft), this.crunchTotal), Math.max(0, this.crunchLeft), this.crunchLeft < 20, this.crunchTotal);
-      const items = this.dayCfg.chores.map((c) => ({ label: CHORE_INFO[c].label, room: CHORE_INFO[c].room, done: this.choresDone.has(c) }));
+      const items = this.dayCfg.chores.map((c) => ({ label: CHORE_INFO[c].label, room: this.stations.roomOf(c), done: this.choresDone.has(c) }));
       this.ui.setDusk(1 - Math.max(0, this.crunchLeft) / this.crunchTotal);
       this.ui.setChores(items, "");
       this.ui.setClockout(this.allChoresDone(), this.crunchLeft);
@@ -1673,8 +2010,10 @@ export class GameScene extends Phaser.Scene {
           if (chore) dots.push({ x: s.x, y: s.y, color: "#e9c25a", r: 3.2 });
         }
       }
+      const endgame = this.phase === "downsizing" && this.quota - this.fired <= 5;
       for (const e of this.enemies) {
         if (e.dead) continue;
+        if (e.hostile && this.vision.on && e.vis < 0.5 && !endgame && !e.def.boss) continue;
         dots.push({ x: e.x, y: e.y, color: e.ally ? "#4b9a63" : e.hostile ? (e.def.boss ? "#e9c25a" : "#c4382c") : "#8b95a7", r: e.def.boss ? 4 : 2 });
       }
       dots.push({ x: p.x, y: p.y, color: "#ffffff", r: 3.5 });
@@ -1700,7 +2039,9 @@ export class GameScene extends Phaser.Scene {
       for (const s of this.stations.list) if (s.marker && s.marker.visible) add(s.x, s.y, "#e9c25a", "exclamation");
     } else if (this.phase === "downsizing") {
       const p = this.player;
-      const list = this.enemies.filter((e) => e.hostile && !e.dead)
+      // Hunting is the point: arrows only show up for the last few firings (and for bosses).
+      const endgame = this.quota - this.fired <= 5;
+      const list = this.enemies.filter((e) => e.hostile && !e.dead && (endgame || e.def.boss))
         .sort((a, b) => ((a.x - p.x) ** 2 + (a.y - p.y) ** 2) - ((b.x - p.x) ** 2 + (b.y - p.y) ** 2)).slice(0, 10);
       for (const e of list) add(e.x, e.y, e.def.boss ? "#e9c25a" : "#c4382c", e.def.boss ? "skull" : undefined);
     }
@@ -1813,6 +2154,7 @@ export class GameScene extends Phaser.Scene {
 
     const inp = this.readInput();
     this.laserGfx.clear();
+    this.teleGfx.clear();
 
     // Flow fields follow the player.
     this.flowTimer -= dt;
@@ -1855,12 +2197,22 @@ export class GameScene extends Phaser.Scene {
       this.timed("props", () => this.props.update(dt));
     }
     this.timed("stations", () => this.stations.update(dt));
+    if (this.phase === "downsizing" || this.phase === "dayclear") this.updatePhoneBombs(dt);
+    this.vault.update(dt);
+    this.speakers.update(realDt);
     this.updateChainLines(realDt);
     this.drawHpBars();
     if (this.phase !== "downsizing" && this.phase !== "crunch") this.ui.setPrompt(null);
 
     this.updateCamera(realDt, inp.aimX, inp.aimY);
     this.updateLighting(realDt);
+    this.timed("vision", () => this.vision.update(realDt));
+    // Coworkers out of your line of sight fade into the dark.
+    const fog = this.vision.on;
+    for (const e of this.enemies) {
+      const want = !fog || e.mode !== "hostile" || this.vision.sees(e.x, e.y, e.r) ? 1 : 0;
+      e.vis += clamp(want - e.vis, -realDt * 5, realDt * 9);
+    }
     if (this.phase === "crunch" || this.phase === "downsizing" || this.phase === "dayclear") this.timed("hud", () => this.updateHud(realDt));
     else this.ui.setArrows([]);
     this.pressed.clear();

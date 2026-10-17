@@ -14,7 +14,9 @@ export const enum Tile {
   GLASS = 2,
   ELEVATOR = 3,
   EXIT_DOOR = 4,
-  DRYWALL = 5
+  DRYWALL = 5,
+  /** The code-locked security door (see systems/Vault). */
+  LOCKED = 6
 }
 
 export const enum Mat {
@@ -47,7 +49,9 @@ export interface FurnPlacement {
 
 export type StationKind =
   | "emails" | "copier" | "shred" | "coffee" | "presentation" | "memos" | "server" | "plant"
-  | "cooler" | "powerstrip" | "vending" | "supply" | "toilet" | "arcade" | "fridge";
+  | "cooler" | "powerstrip" | "vending" | "supply" | "toilet" | "arcade" | "fridge"
+  // chore hosts that move around: desktop printers, the Wi-Fi router, the mail cart (spawned daily), whiteboards
+  | "printer" | "router" | "mailcart" | "board";
 
 export interface StationDef {
   id: string;
@@ -247,8 +251,8 @@ export function buildOffice(): OfficeMap {
   place("chair_conf_270", 24.7, 6.2, { solid: false });
   home(19.6, 4.6, DOWN); home(23.4, 7.85, UP); home(24.75, 6.2, LEFT);
   station("presentation", place("tv", 21.5, 1.35), 21.5, 1.35, { id: "presentation" });
-  place("whiteboard", 16.9, 1.25);
-  place("whiteboard", 26.2, 1.25);
+  station("board", place("whiteboard", 16.9, 1.25), 16.9, 1.25, { id: "board_room_l" });
+  station("board", place("whiteboard", 26.2, 1.25), 26.2, 1.25, { id: "board_room_r" });
   plant(15.5, 10.5); plant(28.4, 10.5); plant(28.4, 1.6);
 
   // ================================================================== Cafeteria
@@ -285,7 +289,7 @@ export function buildOffice(): OfficeMap {
   place("sofa_lobby_180", 58.4, 9.4);
   place("armchair_lobby_90", 55.9, 6.4);
   place("coffee_table", 58.4, 6.6);
-  place("whiteboard", 57.4, 1.25);
+  station("board", place("whiteboard", 57.4, 1.25), 57.4, 1.25, { id: "board_lounge" });
   home(58.0, 8.55, UP); home(56.9, 6.4, RIGHT);
   plant(62.4, 10.5); plant(55.6, 10.5);
 
@@ -301,7 +305,6 @@ export function buildOffice(): OfficeMap {
       home(cx, py + 0.3, DOWN);
       home(cx, py + 3.32, UP);
     }
-    place("partition", px + 2.75, py + 1.8, { w: P(5.5), h: 12 });
     place("trash", px + 5.85, py + 0.45);
     plant(px - 0.35, py + 3.1);
   };
@@ -316,7 +319,7 @@ export function buildOffice(): OfficeMap {
   // East wing
   pod(44, 16.6); pod(50.5, 16.6); pod(57, 16.6);
   pod(44, 21.4); pod(50.5, 21.4);
-  place("whiteboard", 59.8, 21.25);
+  station("board", place("whiteboard", 59.8, 21.25), 59.8, 21.25, { id: "board_east" });
   place("break_table", 59.8, 23.6);
   place("stool", 58.75, 23.6, { solid: false });
   place("stool", 60.85, 23.6, { solid: false });
@@ -375,7 +378,7 @@ export function buildOffice(): OfficeMap {
   plant(45.4, 34.6);
 
   // ================================================================== Lobby
-  place("reception", 54.5, 38.6);
+  station("emails", place("reception", 54.5, 38.6), 54.5, 38.6, { id: "emails_lobby" });
   place("chair_office_0", 54.5, 37.8, { solid: false });
   home(54.5, 37.75, DOWN);
   place("rug_lobby", 54.5, 42.2, { floor: true, solid: false, shots: false });

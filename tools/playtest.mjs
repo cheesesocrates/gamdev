@@ -24,6 +24,8 @@ const browser = await puppeteer.launch({
   args: ["--autoplay-policy=no-user-gesture-required", "--ignore-gpu-blocklist", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,720"]
 });
 const page = await browser.newPage();
+if (process.env.PT_NOVISION) await page.evaluateOnNewDocument(() => { window.__PT_NOVISION = true; });
+if (process.env.PT_NOFLAMES) await page.evaluateOnNewDocument(() => { window.__PT_NOFLAMES = true; });
 await page.setViewport({ width: 1280, height: 720 });
 const errors = [];
 page.on("console", (m) => {
@@ -100,7 +102,11 @@ try {
   await sleep(1200);
   await shot("01-title");
   await page.click("#start");
-  await sleep(1000);
+  await sleep(900);
+  if (scenario === "full") await shot("01b-lore");
+  // The lore screen: skip it.
+  await ev(() => { const b = document.querySelector("#lskip"); if (b) b.click(); });
+  await sleep(600);
 
   if (scenario === "full") {
     await sleep(700);
@@ -108,14 +114,12 @@ try {
     await page.keyboard.press("Space");
     await sleep(1600);
     await shot("02-crunch-start");
-    const stationOf = { emails: "emails", print: "copier_main", shred: "shredder", coffee: "coffee", presentation: "presentation", memos: "memos", server: "server", plant: "ceo_plant" };
-    const todo = await ev(() => window.__HT.scene.dayCfg.chores.filter((c) => !window.__HT.scene.choresDone.has(c)));
-    console.log("chores today:", todo.join(", "));
-    for (const c of todo) await doStation(stationOf[c]);
+    const todo = await ev(() => { const s = window.__HT.scene; return s.dayCfg.chores.filter((c) => !s.choresDone.has(c)).map((c) => [c, s.stations.hostOf(c)?.def.id, s.stations.roomOf(c)]); });
+    console.log("chores today:", JSON.stringify(todo));
+    for (const [, id] of todo) await doStation(id);
     const coolers = await ev(() => window.__HT.scene.stations.list.filter((s) => s.def.kind === "cooler").map((s) => s.def.id));
     await doStation(coolers[coolers.length - 1]);
     await doStation("copier_2");
-    await doStation("barricade_copy");
     console.log(await state());
     await shot("03-after-chores");
     await page.keyboard.press("Enter");
@@ -128,9 +132,12 @@ try {
     await sleep(700);
     await shot("04b-review-bought");
     await page.click("#go");
-    await sleep(2800);
-    await shot("05-announce");
     await sleep(3600);
+    await shot("05-announce");
+    await sleep(2400);
+    await shot("05a-announce-2");
+    await page.mouse.click(640, 360);
+    await sleep(900);
     await shot("05b-intro-fight");
     await page.keyboard.press("Space");
     await sleep(1300);
@@ -148,8 +155,138 @@ try {
     await shot("08-results");
     await ev(() => { const c = document.querySelector("#results .card"); if (c) c.click(); });
     await sleep(2200);
+    await shot("08b-memo");
+    await ev(() => { const b = document.querySelector("#mgo"); if (b) b.click(); });
+    await sleep(1600);
     console.log(await state());
     await shot("09-day2");
+  }
+
+  // Straight to the menus: Performance Review (with money to spend), then the end-of-day picks.
+  if (scenario === "ui") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    await ev(() => {
+      const h = window.__HT;
+      h.state.bank = 70;
+      h.give("crit", 1);
+      h.scene.endCrunch(true);
+    });
+    await sleep(900);
+    await page.keyboard.press("Space");
+    await sleep(1600);
+    await shot("u01-review");
+    await ev(() => { const c = document.querySelector("#review .card.buyable"); if (c) c.click(); });
+    await sleep(700);
+    await ev(() => { const c = document.querySelector("#review .gun.buyable"); if (c) c.click(); });
+    await sleep(800);
+    await shot("u02-review-bought");
+    await ev(() => { document.querySelector("#review")?.remove(); window.__HT.scene.showResults(); });
+    await sleep(1800);
+    await shot("u03-results");
+  }
+
+  // The two new bosses: the Hatchet Man (day 3) and the Cold Caller (day 6).
+  if (scenario === "boss") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    for (const day of [3, 6]) {
+      await ev((d) => { const h = window.__HT; h.god(true); h.day(d); }, day);
+      await sleep(600);
+      await ev(() => window.__HT.toFight());
+      await sleep(300);
+      await ev(() => window.__HT.toFight());
+      await sleep(1200);
+      await ev(() => { const s = window.__HT.scene; s.fired = Math.floor(s.quota * 0.4); });
+      for (let k = 0; k < 30; k++) { if (await ev(() => !!window.__HT.scene.waves.boss)) break; await sleep(300); }
+      await sleep(1200);
+      await ev(() => { const s = window.__HT.scene; const b = s.waves.boss; if (b) { const p = s.world.nearestWalkable(b.x + 380, b.y + 40); s.player.x = p.x; s.player.y = p.y; } });
+      for (let i = 0; i < 18; i++) {
+        await aimAndFire(380);
+        if (i === 2 || i === 8 || i === 15) await shot(`b${day}-${String(i).padStart(2, "0")}`);
+      }
+      console.log(day, JSON.stringify(await ev(() => { const s = window.__HT.scene; const b = s.waves.boss; return { boss: b && b.def.title, hp: b && Math.round(b.hp), max: b && Math.round(b.maxHp), phones: s.phoneBombs.length, wrecked: s.wrecked.length, vis: s.vision.level, perf: window.__HT.perf(), prof: window.__HT.prof() }; })));
+    }
+  }
+
+  // The code-locked door: a clue in a chore, the note, the keypad (one wrong guess), the briefcase.
+  if (scenario === "vault") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    const info = await ev(() => { const s = window.__HT.scene, v = s.vault; return { room: v.room.name, code: v.code, chores: s.dayCfg.chores, notes: s.dayCfg.chores.map((c) => v.noteFor(c)) }; });
+    console.log("vault", JSON.stringify(info));
+    await ev(() => { const s = window.__HT.scene; const c = s.dayCfg.chores.find((x) => s.vault.noteFor(x)); s.startMini(c, () => s.completeChore(c)); });
+    await sleep(1500);
+    await shot("v01-chore-note");
+    await ev(() => window.__HT.scene.mini?.win());
+    await sleep(1600);
+    await shot("v02-sticky-code");
+    await ev(() => { const s = window.__HT.scene, v = s.vault; const p = s.world.nearestWalkable(v.doorX, v.doorY + (v.room.ty > 20 ? -100 : 100)); s.player.x = p.x; s.player.y = p.y; });
+    await sleep(500);
+    await shot("v03-door");
+    await page.keyboard.press("KeyE");
+    await sleep(900);
+    const before = await ev(() => window.__HT.scene.crunchLeft);
+    await page.keyboard.type("0000");
+    await page.keyboard.press("Enter");
+    await sleep(300);
+    await shot("v04-keypad-wrong");
+    await sleep(700);
+    console.log("penalty", (before - (await ev(() => window.__HT.scene.crunchLeft))).toFixed(2), "s (expect ~1 + elapsed)");
+    for (let i = 0; i < 4; i++) if (info.code[i] !== 0) await page.keyboard.press(`Digit${info.code[i]}`);
+    await sleep(200);
+    await shot("v05-keypad-right");
+    await page.keyboard.press("Enter");
+    await sleep(1800);
+    console.log("open", await ev(() => window.__HT.scene.vault.open));
+    await shot("v06-open");
+    await ev(() => { const s = window.__HT.scene, v = s.vault; const z = s.map.zones.find((zz) => zz.name === v.room.name); const p = s.world.nearestWalkable((z.x0 + z.x1 + 1) * 32, (z.y0 + z.y1 + 1) * 32); s.player.x = p.x; s.player.y = p.y; });
+    await sleep(1200);
+    await shot("v07-briefcase");
+    console.log("after briefcase", JSON.stringify(await ev(() => ({ bank: window.__HT.state.bank, unlocked: window.__HT.state.unlocked }))));
+  }
+
+  // Boss mechanics up close: the Hatchet Man charging across the west wing, then the memo lines for days 1-9.
+  if (scenario === "hatchet") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    await ev(() => { const h = window.__HT; h.god(true); h.day(3); });
+    await sleep(600);
+    await ev(() => window.__HT.toFight());
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    await ev(() => {
+      const s = window.__HT.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      const p = s.world.nearestWalkable(4 * 64, 27.4 * 64);
+      s.player.x = p.x; s.player.y = p.y;
+      const b = s.world.nearestWalkable(17 * 64, 27.4 * 64);
+      const e = s.spawnEnemy("hatchet", b.x, b.y, "hostile");
+      s.waves.boss = e;
+      e.spawnGrace = 0;
+      e.chargeCd = 0.3;
+      s.flowTile = -1;
+    });
+    const seen = new Set();
+    for (let i = 0; i < 60; i++) {
+      const st = await ev(() => { const s = window.__HT.scene, b = s.waves.boss; return b ? { wind: b.chargeWind > 0, charging: b.charging > 0, dizzy: b.dizzy > 0, x: Math.round(b.x), wrecked: s.wrecked.length, moved: s.props.list.filter((p) => Math.abs(p.f.x - p.homeX) + Math.abs(p.f.y - p.homeY) > 4).length } : null; });
+      if (st) { for (const k of ["wind", "charging", "dizzy"]) if (st[k]) seen.add(k); }
+      if (i === 6 || i === 14 || i === 24) await shot(`h${String(i).padStart(2, "0")}`);
+      if (i % 8 === 0) console.log(JSON.stringify(st));
+      await sleep(200);
+    }
+    console.log("hatchet states seen:", [...seen].join(", "));
+    console.log("memo lines:");
+    for (let d = 1; d <= 9; d++) {
+      const lines = await ev((day) => { const h = window.__HT; return h.scene.memoLines(h.dayConfig(day), h.dayConfig(day + 1)); }, d);
+      console.log(d, "->", d + 1, JSON.stringify(lines));
+    }
   }
 
   if (scenario === "stress") {
@@ -160,6 +297,8 @@ try {
       for (const w of Object.keys(h.state.unlocked)) h.state.unlocked[w] = true;
       h.god(true);
       h.day(6);
+      // PT_NOVISION=1: measure without the line-of-sight shadows.
+      if (window.__PT_NOVISION) h.scene.vision.update = () => {};
     });
     await sleep(500);
     await ev(() => window.__HT.toFight());
@@ -218,7 +357,7 @@ try {
     await page.keyboard.press("Space");
     await sleep(1500);
     const chores = await ev(() => window.__HT.scene.dayCfg.chores);
-    const stationOf = { emails: "emails", print: "copier_main", shred: "shredder", coffee: "coffee", presentation: "presentation", memos: "memos", server: "server", plant: "ceo_plant" };
+    const stationOf = await ev(() => { const s = window.__HT.scene; return Object.fromEntries(s.dayCfg.chores.map((c) => [c, s.stations.hostOf(c)?.def.id])); });
     for (const c of chores.slice(0, 2)) {
       await ev((sid) => {
         const s = window.__HT.scene;
@@ -266,7 +405,7 @@ try {
     await page.keyboard.press("Space");
     await sleep(1500);
     const rect = (sel) => ev((s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }, sel);
-    for (const c of ["plant", "print", "shred", "coffee", "presentation", "memos", "server", "emails"]) {
+    for (const c of ["plant", "print", "shred", "coffee", "presentation", "memos", "server", "emails", "jam", "wifi", "mail", "board"]) {
       await ev((chore) => { const s = window.__HT.scene; s.mini?.close(); s.mini = null; s.startMini(chore, () => {}); }, c);
       await sleep(700);
       if (c === "plant") {
@@ -314,6 +453,23 @@ try {
       } else if (c === "emails") {
         const w = await ev(() => document.querySelector(".em-text").textContent);
         await page.keyboard.type(w.replace(/ /g, " ").slice(0, 7), { delay: 40 });
+      } else if (c === "jam") {
+        for (const k of ["KeyA", "KeyD", "KeyA", "KeyD", "KeyA", "KeyD", "KeyD"]) { await page.keyboard.press(k); await sleep(90); }
+      } else if (c === "wifi") {
+        await sleep(1700);
+      } else if (c === "mail") {
+        for (const k of ["Digit1", "Digit2", "Digit3"]) { await page.keyboard.press(k); await sleep(420); }
+      } else if (c === "board") {
+        const r = await rect(".mini-stage");
+        if (r) {
+          await page.mouse.move(r.x + r.w * 0.15, r.y + r.h * 0.6);
+          await page.mouse.down();
+          for (let i = 0; i < 5; i++) {
+            await page.mouse.move(r.x + r.w * 0.85, r.y + r.h * (0.45 + i * 0.1), { steps: 6 });
+            await page.mouse.move(r.x + r.w * 0.15, r.y + r.h * (0.5 + i * 0.1), { steps: 6 });
+          }
+          await page.mouse.up();
+        }
       }
       await shot(`m-${c}`);
       await page.mouse.up().catch(() => {});

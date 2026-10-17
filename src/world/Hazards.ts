@@ -33,6 +33,11 @@ export class Hazards {
   private centres = new Map<number, { x: number; y: number; r: number }>();
   /** Tiles already stamped into the water layer, with the electric state they were painted in. */
   private painted = new Map<number, number>();
+  /** Animated flames for burning tiles that are on screen (pooled). */
+  private flames = new Map<number, { imgs: Phaser.GameObjects.Image[]; ox: number[]; oy: number[]; base: number[]; glow: Phaser.GameObjects.Image; seed: number; stamp: number }>();
+  private flamePool: Phaser.GameObjects.Image[] = [];
+  private glowPool: Phaser.GameObjects.Image[] = [];
+  private flameStamp = 0;
   private hasElectric = false;
   private waterDirty = false;
   private waterCd = 0;
@@ -353,16 +358,19 @@ export class Hazards {
     const doEmit = this.fireEmitTimer <= 0;
     if (doEmit) this.fireEmitTimer = 0.07;
     let burning = 0;
+    this.flameStamp++;
     for (let i = 0; i < this.fire.length; i++) {
       if (this.fire[i] <= 0) continue;
       burning++;
       this.fire[i] -= dt;
       const x = (i % this.w + 0.5) * TILE, y = (Math.floor(i / this.w) + 0.5) * TILE;
-      if (doEmit && x > vx0 && x < vx1 && y > vy0 && y < vy1) {
-        this.fx.burst("fire", x + rand(-22, 22), y + rand(-18, 18), 1);
+      const onScreen = x > vx0 && x < vx1 && y > vy0 && y < vy1;
+      if (onScreen) this.animateFlames(i, x, y);
+      if (doEmit && onScreen) {
+        if (chance(0.35)) this.fx.burst("fire", x + rand(-22, 22), y + rand(-18, 18), 1);
         const sheets = this.paperImg.get(i);
         if (sheets) for (const sh of sheets) sh.setTint(0xff8a3a);
-        if (chance(0.3)) this.fx.burst("ember", x + rand(-20, 20), y + rand(-20, 20), 1);
+        if (chance(0.45)) this.fx.burst("ember", x + rand(-20, 20), y + rand(-20, 20), 1);
       }
       if (doSpread && this.paper[i]) {
         const tx = i % this.w, ty = Math.floor(i / this.w);
@@ -385,6 +393,14 @@ export class Hazards {
       }
     }
     this.burningCount = burning;
+    // Flames on tiles that went out (or scrolled off screen) go back to the pool.
+    for (const [i, fl] of this.flames) {
+      if (fl.stamp === this.flameStamp) continue;
+      for (const im of fl.imgs) { im.setVisible(false); this.flamePool.push(im); }
+      fl.glow.setVisible(false);
+      this.glowPool.push(fl.glow);
+      this.flames.delete(i);
+    }
 
     // Crackle on live water.
     this.zapTimer -= dt;
@@ -402,7 +418,48 @@ export class Hazards {
     }
   }
 
+  /** Two or three flickering flames and a warm glow per burning tile; they shrink as the fire dies. */
+  private animateFlames(i: number, x: number, y: number) {
+    let fl = this.flames.get(i);
+    if (!fl) {
+      const big = this.paper[i] === 1;
+      const n = big ? 3 : 1;
+      const imgs: Phaser.GameObjects.Image[] = [], ox: number[] = [], oy: number[] = [], base: number[] = [];
+      for (let k = 0; k < n; k++) {
+        const im = this.flamePool.pop() ?? this.scene.add.image(0, 0, "flame", 0).setOrigin(0.5, 0.92);
+        im.setVisible(true);
+        imgs.push(im);
+        ox.push(rand(-20, 20));
+        oy.push(rand(-14, 18));
+        base.push(big ? rand(0.85, 1.2) : rand(0.5, 0.7));
+      }
+      const glow = this.glowPool.pop() ?? this.scene.add.image(0, 0, "fx_light_01").setBlendMode(Phaser.BlendModes.ADD).setTint(0xff7a2a).setDepth(DEPTH.HAZARD + 2);
+      glow.setVisible(true);
+      fl = { imgs, ox, oy, base, glow, seed: Math.random() * 10, stamp: 0 };
+      this.flames.set(i, fl);
+      for (const im of imgs) this.scene.tweens.add({ targets: im, scaleY: { from: 0.1, to: im.scaleY || 1 }, duration: 180, ease: "Back.easeOut" });
+    }
+    fl.stamp = this.flameStamp;
+    const t = this.scene.time.now / 1000;
+    const fade = Math.min(1, this.fire[i] / 0.7);
+    fl.imgs.forEach((im, k) => {
+      const s = fl!.base[k] * (0.35 + 0.65 * fade) * (0.9 + 0.12 * Math.sin(t * 9 + fl!.seed * 13 + k * 2));
+      im.setFrame(Math.floor(t * 12 + fl!.seed * 7 + k * 2) % 6)
+        .setPosition(x + fl!.ox[k] + Math.sin(t * 5 + k) * 1.5, y + fl!.oy[k])
+        .setScale(s, s * (1 + 0.1 * Math.sin(t * 13 + k + fl!.seed)))
+        .setDepth(y + fl!.oy[k] + 8)
+        .setAlpha(0.35 + 0.65 * fade);
+    });
+    fl.glow.setPosition(x, y).setScale(1.15 + 0.15 * Math.sin(t * 7 + fl.seed)).setAlpha((0.3 + 0.14 * Math.sin(t * 11 + fl.seed * 3)) * fade);
+  }
+
   clear() {
+    for (const [, fl] of this.flames) {
+      for (const im of fl.imgs) { im.setVisible(false); this.flamePool.push(im); }
+      fl.glow.setVisible(false);
+      this.glowPool.push(fl.glow);
+    }
+    this.flames.clear();
     for (const sheets of this.paperImg.values()) sheets.forEach((sh) => sh.destroy());
     this.waterTiles.clear();
     this.waterRT.clear();
