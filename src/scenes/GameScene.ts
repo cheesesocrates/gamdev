@@ -40,7 +40,7 @@ const LORE = [
   "You are the best employee this office has ever had.",
   "You are also the most expensive.",
   "This morning, management announced budget cuts.",
-  "Your salary alone could pay for five of your coworkers. They've done the math.",
+  "Your salary alone could pay for 10 of your coworkers. They've done the math.",
   "Do your chores. Survive 5 PM. Whatever happens, don't get fired."
 ];
 
