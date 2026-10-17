@@ -50,6 +50,8 @@ export class Enemy {
   hitFlash = 0;
   /** Seconds of "soaked" left: slower, fireproof, and double damage from shocks. */
   soaked = 0;
+  /** Standing in a puddle this frame. */
+  inWater = false;
   fireTickCd = 0;
 
   // AI
@@ -325,6 +327,8 @@ export class Enemy {
     if (this.spawnGrace > 0 || this.stun > 0) {
       this.vx *= Math.pow(0.01, dt);
       this.vy *= Math.pow(0.01, dt);
+      // Zapped in a live puddle: a riot shield goes round and round with them.
+      if (this.stun > 0 && this.def.shield && this.inWater) this.facing += dt * 10;
       return;
     }
     if (this.slip > 0) {
@@ -828,10 +832,12 @@ export class Enemy {
   // ---------------------------------------------------------------- hazards
   private environment(_dt: number) {
     const g = this.g;
+    this.inWater = false;
     if (this.mode === "npc") return;
     const hz = g.hazards;
     const hm = GameState.stats.hazardMult;
-    if (hz.isWater(this.x, this.y)) {
+    this.inWater = hz.isWater(this.x, this.y);
+    if (this.inWater) {
       if (this.soaked <= 0 && chance(0.35)) g.fx.text(this.x, this.y - 30, "SOAKED", { color: "#7fd8ff", size: 13, dur: 0.6 });
       this.soaked = 4;
     }
@@ -898,8 +904,9 @@ export class Enemy {
     if (this.shield) {
       const sx = this.x + Math.cos(this.facing) * (this.r + 8);
       const sy = this.y + Math.sin(this.facing) * (this.r + 8);
-      const down = this.stun > 0 || this.slip > 0;
-      this.shield.setPosition(sx, sy).setRotation(this.facing).setDepth(this.y + 6).setAlpha((down ? 0.35 : 1) * this.vis);
+      // Slipping (or zapped) in a puddle they spin with the shield still in hand; a keyboard bonk knocks it aside.
+      const aside = this.stun > 0 && this.slip <= 0 && !this.inWater;
+      this.shield.setPosition(sx, sy).setRotation(this.facing).setDepth(this.y + 6).setAlpha((aside ? 0.35 : 1) * this.vis);
     }
 
     // HP bar for anything damaged (or bosses): all bars share one Graphics, drawn by the scene.

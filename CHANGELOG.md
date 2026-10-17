@@ -30,6 +30,9 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - UI: the end-of-day internal memo is one line now: "**Due to budget cuts:** the Hatchet Man makes the cuts himself."
   (written once, with the single biggest change for tomorrow: a boss, a new kind of coworker, or the chore load), plus
   tomorrow's quota. No more four bullet points that all start with "Due to budget cuts". The PA reads the same line.
+- Gameplay: HR Directors who slip in a puddle keep their riot shield in hand and spin round with it, instead of the
+  shield fading away. Zapped in a live puddle, they spin too. (The shield still can't block while they're down; a
+  keyboard bonk still knocks it aside.)
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.
