@@ -44,6 +44,10 @@ When a batch ships, the Unreleased lines move under a new version heading with t
   seconds comes back in through an entrance.
 - Fix: a coworker killed by a live puddle no longer keeps updating for the rest of that frame (it could leave a
   stray flame sprite behind).
+- Fix (World): the golden briefcase behind the code-locked door is put down on clear floor near the middle of the
+  room, where no furniture is drawn over it. In the Marketing Lounge the middle of the room is under the coffee table,
+  so the briefcase used to be drawn underneath it. Checked in all three lockable rooms (Marketing Lounge, Supply
+  Closet, Restrooms).
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.

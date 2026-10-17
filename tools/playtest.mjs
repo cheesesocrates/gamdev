@@ -330,6 +330,29 @@ try {
     await shot("l01-locked");
   }
 
+  // The golden briefcase in each lockable room: on a clear spot, never under the furniture.
+  if (scenario === "briefcase") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    for (const name of ["Marketing Lounge", "Supply Closet", "Restrooms"]) {
+      const info = await ev((n) => {
+        const s = window.__HT.scene, v = s.vault;
+        for (let k = 0; k < 80 && v.room.name !== n; k++) v.setupDay(s.dayCfg.chores);
+        v.unlock();
+        const b = v.brief;
+        const p = s.world.nearestWalkable(b.x, b.y + 150);
+        s.player.x = p.x; s.player.y = p.y;
+        const bb = b.getBounds();
+        const over = [...s.furniture.values()].filter((f) => f.sprite.visible && f.sprite.depth > -7000 && Phaser.Geom.Rectangle.Overlaps(f.sprite.getBounds(), bb)).map((f) => f.key);
+        return { room: v.room.name, x: Math.round(b.x), y: Math.round(b.y), overlapping: over };
+      }, name);
+      console.log("briefcase", JSON.stringify(info));
+      await sleep(500);
+      await shot(`bc-${name.split(" ")[0].toLowerCase()}`);
+    }
+  }
+
   // The end-of-day memo for a couple of days (one line each).
   if (scenario === "memo") {
     await sleep(700);
