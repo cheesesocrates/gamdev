@@ -48,6 +48,9 @@ When a batch ships, the Unreleased lines move under a new version heading with t
   room, where no furniture is drawn over it. In the Marketing Lounge the middle of the room is under the coffee table,
   so the briefcase used to be drawn underneath it. Checked in all three lockable rooms (Marketing Lounge, Supply
   Closet, Restrooms).
+- Gameplay: AI robots that walk into a puddle short out: they freeze, spark and rattle for about a second
+  ("SHORT CIRCUIT!"), then blow up. The blast hurts the coworkers around them (never you, like every trap), cracks glass
+  but leaves the walls standing, and counts as a trap kill. Finish one off while it's frying and it still goes bang.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.

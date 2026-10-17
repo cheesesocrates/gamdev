@@ -330,6 +330,35 @@ try {
     await shot("l01-locked");
   }
 
+  // AI robots in a puddle: they short out, then blow up (hurting coworkers around them, never you).
+  if (scenario === "robots") {
+    await ev(() => { window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    const before = await ev(() => {
+      const s = window.__HT.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      const p = s.world.nearestWalkable(10 * 64, 19 * 64);
+      s.player.x = p.x; s.player.y = p.y + 140;
+      const r = s.spawnEnemy("robot", p.x, p.y, "hostile");
+      r.spawnGrace = 99;
+      const n = s.spawnEnemy("intern", p.x + 50, p.y, "hostile");
+      n.spawnGrace = 99;
+      window.__bot = r; window.__mate = n;
+      s.hazards.flood(p.x, p.y, 6, 0.01);
+      return { hp: window.__HT.state.hp, mate: Math.round(n.hp) };
+    });
+    await sleep(500);
+    await shot("r01-shorting");
+    const mid = await ev(() => ({ shortT: +window.__bot.shortT.toFixed(2), dead: window.__bot.dead }));
+    await sleep(1400);
+    await shot("r02-boom");
+    const after = await ev(() => ({ botDead: window.__bot.dead, mateHp: Math.round(window.__mate.hp), mateDead: window.__mate.dead, hp: window.__HT.state.hp, fired: window.__HT.scene.fired }));
+    console.log("robot in water:", JSON.stringify({ before, mid, after }));
+  }
+
   // The golden briefcase in each lockable room: on a clear spot, never under the furniture.
   if (scenario === "briefcase") {
     await sleep(700);

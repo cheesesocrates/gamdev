@@ -52,6 +52,9 @@ export class Enemy {
   soaked = 0;
   /** Standing in a puddle this frame. */
   inWater = false;
+  /** An AI robot that walked into water: seconds until it blows (0 = fine). */
+  shortT = 0;
+  private shortFx = 0;
   fireTickCd = 0;
 
   // AI
@@ -841,13 +844,30 @@ export class Enemy {
   }
 
   // ---------------------------------------------------------------- hazards
-  private environment(_dt: number) {
+  private environment(dt: number) {
     const g = this.g;
     this.inWater = false;
     if (this.mode === "npc") return;
     const hz = g.hazards;
     const hm = GameState.stats.hazardMult;
     this.inWater = hz.isWater(this.x, this.y);
+    // AI robots and puddles don't mix: they fry on the spot for a moment, then blow up.
+    if (this.def.robot && this.inWater && this.shortT <= 0) this.startShort();
+    if (this.shortT > 0) {
+      this.shortT -= dt;
+      this.stun = Math.max(this.stun, 0.15);
+      if ((this.shortFx -= dt) <= 0) {
+        this.shortFx = 0.07;
+        g.fx.burst("zap", this.x + rand(-10, 10), this.y + rand(-10, 10), 3);
+        if (chance(0.5)) g.fx.burst("spark", this.x, this.y - 6, 2, 0x9fe8ff);
+        g.audio.play("zap", { vol: 0.22, minGap: 110 });
+      }
+      if (this.shortT <= 0) {
+        this.shortT = 0;
+        g.robotOverload(this);
+        return;
+      }
+    }
     if (this.inWater) {
       if (this.soaked <= 0 && chance(0.35)) g.fx.text(this.x, this.y - 30, "SOAKED", { color: "#7fd8ff", size: 13, dur: 0.6 });
       this.soaked = 4;
@@ -859,7 +879,7 @@ export class Enemy {
       g.fx.light(this.x, this.y, 0x6fd8ff, 1.4, 0.15);
       g.audio.play("zap", { vol: 0.35, minGap: 70 });
       if (g.hitEnemy(this, 40 * hm, { angle: 0, kind: "zap", x: this.x, y: this.y, knock: 0 })) { g.trapKill(this.x, this.y); return; }
-    } else if (hz.isWater(this.x, this.y) && this.slipCd <= 0 && this.slip <= 0 && !this.def.boss) {
+    } else if (this.inWater && this.slipCd <= 0 && this.slip <= 0 && this.shortT <= 0 && !this.def.boss) {
       const sp = Math.hypot(this.vx, this.vy);
       if (sp > 60) {
         this.slip = (this.def.shield ? 2.4 : 1.0) * (GameState.stats.hazardMult > 1 ? 1.5 : 1);
@@ -886,6 +906,19 @@ export class Enemy {
     }
   }
 
+  /** Water in the works: a robot starts to short out (it blows in a second, see GameScene.robotOverload). */
+  private startShort() {
+    const g = this.g;
+    this.shortT = 1.1;
+    this.shortFx = 0;
+    this.windup = 0;
+    g.fx.text(this.x, this.y - 44, "SHORT CIRCUIT!", { color: "#9fe8ff", size: 16, pop: true, dur: 0.9 });
+    g.fx.light(this.x, this.y, 0x6fd8ff, 1.6, 0.25);
+    g.audio.play("zap", { vol: 0.5 });
+    if (g.canBark()) this.say(pick(["ERR: H2O DETECTED", "BZZT! WATER DAMAGE!", "FATAL EXCEPTION", "NOT WATERPROOF!"]), 1.1, "#9fe8ff");
+    g.tipOnce("robotwater", "AI robots short out in water and blow up. Lure them into a puddle!", "#6fd8ff");
+  }
+
   // ---------------------------------------------------------------- render
   private render(dt: number) {
     const g = this.g;
@@ -902,6 +935,11 @@ export class Enemy {
     else if (this.def.tint) this.sprite.setTint(this.def.tint);
     else this.sprite.clearTint();
     if (this.chargeWind > 0.05) this.sprite.setTintFill(Math.floor(g.time.now / 70) % 2 ? 0xffffff : 0xc4382c);
+    if (this.shortT > 0) {
+      // Frying: flicker white/blue faster and faster, and rattle in place.
+      this.sprite.setTintFill(Math.floor(g.time.now / (25 + this.shortT * 45)) % 2 ? 0xffffff : 0x6fd8ff);
+      this.sprite.setPosition(this.x + rand(-2.5, 2.5), this.y + rand(-2.5, 2.5)).setRotation(rot + rand(-0.15, 0.15));
+    }
     if (this.windup > 0.05) this.sprite.setScale(this.def.scale * CHAR_SCALE * (1 + Math.sin(g.time.now / 30) * 0.04));
     else this.sprite.setScale(this.def.scale * CHAR_SCALE);
     this.shadow.setPosition(this.x, this.y + 8).setDepth(this.y - 30).setAlpha(this.vis);

@@ -1168,7 +1168,11 @@ export class GameScene extends Phaser.Scene {
     if (e.dead) return;
     const wasAlly = e.ally;
     const x = e.x, y = e.y;
+    // Finish off a robot that was shorting out and it goes off anyway.
+    const fried = e.shortT > 0;
+    e.shortT = 0;
     this.removeEnemy(e);
+    if (fried) this.robotBlast(x, y, e);
     if (wasAlly) return;
     const st = GameState.stats;
     this.fired++;
@@ -1295,6 +1299,23 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** A robot that shorted out in a puddle reaches the end of its fuse: it blows (a trap kill: your puddle did it). */
+  robotOverload(e: Enemy) {
+    if (e.dead) return;
+    const x = e.x, y = e.y;
+    e.shortT = 0;
+    this.robotBlast(x, y, e);
+    if (!e.dead && this.hitEnemy(e, e.hp + 1, { angle: 0, kind: "zap", x, y, knock: 0, silent: true, noChain: true, noCrit: true })) this.trapKill(x, y);
+  }
+
+  /** The bang of a fried robot: hurts the coworkers around it (never you), cracks glass, but leaves the walls standing. */
+  private robotBlast(x: number, y: number, skip: Enemy) {
+    this.fx.burst("zap", x, y, 16);
+    this.fx.light(x, y, 0x6fd8ff, 3.2, 0.3);
+    this.fx.text(x, y - 50, "KA-BZZT!", { color: "#9fe8ff", size: 22, pop: true, dur: 0.9 });
+    this.explosion(x, y, 125, 85 * GameState.stats.hazardMult, { friendly: true, skip, noSmash: true });
+  }
+
   /** A hazard the player set up finished off a coworker: pay out a little overtime so prep feels worth it. */
   trapKill(x: number, y: number) {
     if (this.phase !== "downsizing") return;
@@ -1302,7 +1323,7 @@ export class GameScene extends Phaser.Scene {
     this.fx.text(x, y - 44, "TRAP KILL +1s", { color: "#9fd3a8", size: 14, dur: 0.9 });
   }
 
-  explosion(x: number, y: number, radius: number, dmg: number, opts: { friendly: boolean; small?: boolean; skip?: Enemy; fromCopier?: boolean }) {
+  explosion(x: number, y: number, radius: number, dmg: number, opts: { friendly: boolean; small?: boolean; skip?: Enemy; fromCopier?: boolean; noSmash?: boolean }) {
     const hm = GameState.stats.hazardMult;
     const small = !!opts.small;
     this.fx.light(x, y, 0xd98a3a, radius / 26, small ? 0.18 : 0.35);
@@ -1333,7 +1354,7 @@ export class GameScene extends Phaser.Scene {
       if (((tx + 0.5) * TILE - x) ** 2 + ((ty + 0.5) * TILE - y) ** 2 < d2max) this.damageGlass(tx, ty, small ? 1 : 3);
     }
     if (!small) {
-      this.smashWalls(x, y, radius * 0.42);
+      if (!opts.noSmash) this.smashWalls(x, y, radius * 0.42);
       for (const s of this.stations.list) {
         if (s.hot && !s.wrecked && (s.x - x) ** 2 + (s.y - y) ** 2 < d2max * 1.2) this.time.delayedCall(160, () => this.stations.detonate(s));
       }

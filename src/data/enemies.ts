@@ -26,6 +26,8 @@ export interface EnemyDef {
   megaphone?: boolean;
   burnout?: boolean;
   dodgy?: boolean;
+  /** Electronics: shorts out and blows up in a puddle. */
+  robot?: boolean;
   smart?: boolean; // avoids fire / live water when pathing
   boss?: boolean;
   bossKind?: BossKind;
@@ -86,7 +88,7 @@ export const ENEMIES: Record<EnemyType, EnemyDef> = {
   },
   robot: {
     type: "robot", title: "AI Replacement", hp: 119, speed: 165, radius: 14,
-    sprites: ["robot1_machine", "robot2_machine"], scale: 1.05, melee: 1, dodgy: true, smart: true,
+    sprites: ["robot1_machine", "robot2_machine"], scale: 1.05, melee: 1, dodgy: true, smart: true, robot: true,
     ranged: { kind: "bolt", dmg: 1, speed: 620, cooldown: 1.25, range: 640, count: 1, spread: 0, keepDist: [260, 420] }
   },
   consultant: {
