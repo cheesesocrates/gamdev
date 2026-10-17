@@ -1,0 +1,10 @@
+# Only the source and the curated assets go to Vercel; it builds dist/ itself.
+Kenney Game Assets All-in-1 3.7.0/
+Kenney Game Assets All-in-1 3.7.0.zip
+assets_src/
+tools/models/
+node_modules/
+dist/
+playtest-out/
+*.log
+*.tsbuildinfo

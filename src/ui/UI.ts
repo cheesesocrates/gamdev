@@ -57,6 +57,8 @@ export class UI {
   /** The scroll hint disappears once the player has switched weapons. */
   private lastActive = "";
   private switched = false;
+  /** Title animations wait for the loading screen to go, so the two logos never overlap. */
+  private afterBoot: (() => void)[] = [];
 
   /** Debug/playtest: dismiss an open phase intro as if Continue was pressed. */
   skipBrief() {
@@ -160,7 +162,12 @@ export class UI {
       window.removeEventListener("pointerdown", go);
       window.removeEventListener("keydown", go);
       gsap.killTweensOf(p);
-      gsap.to(boot, { opacity: 0, duration: 0.45, onComplete: () => boot.remove() });
+      // The boot logo disappears at once; the title logo then drops in on its own.
+      boot.querySelectorAll<HTMLElement>("img, p").forEach((e) => { e.style.visibility = "hidden"; });
+      gsap.to(boot, { opacity: 0, duration: 0.3, onComplete: () => boot.remove() });
+      const queued = this.afterBoot;
+      this.afterBoot = [];
+      for (const fn of queued) fn();
       onEnter?.();
     };
     window.addEventListener("pointerdown", go);
@@ -506,10 +513,16 @@ export class UI {
     $("#tutorial", el).addEventListener("click", () => { if (!this.guarded(el)) { resetIntros(); h.tutorial(); } });
 
     const logo = $(".t-logo-img", el);
-    gsap.from(logo, { y: -140, scale: 0.7, opacity: 0, duration: 0.8, ease: "back.out(1.6)" });
-    // The flame breathes.
-    this.titleTweens.push(gsap.to(logo, { scale: 1.025, rotation: 0.8, duration: 1.4, delay: 0.9, yoyo: true, repeat: -1, ease: "sine.inOut", transformOrigin: "50% 80%" }));
-    this.slideUp(el.querySelectorAll(".t-btns .btn, .t-best, .t-keys"), 0.35);
+    const intro = () => {
+      gsap.fromTo(logo, { y: -140, scale: 0.7, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.8, ease: "back.out(1.6)" });
+      // The flame breathes.
+      this.titleTweens.push(gsap.to(logo, { scale: 1.025, rotation: 0.8, duration: 1.4, delay: 0.9, yoyo: true, repeat: -1, ease: "sine.inOut", transformOrigin: "50% 80%" }));
+      this.slideUp(el.querySelectorAll(".t-btns .btn, .t-best, .t-keys"), 0.35);
+    };
+    if (document.getElementById("boot")) {
+      gsap.set(logo, { opacity: 0 });
+      this.afterBoot.push(intro);
+    } else intro();
     // Office junk drifting around in the background.
     el.querySelectorAll<HTMLElement>(".floaty").forEach((f, i) => {
       const left = i % 2 === 0;

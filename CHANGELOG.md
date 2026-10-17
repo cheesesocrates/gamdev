@@ -6,7 +6,9 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 
 ## Unreleased
 
-- _Nothing yet. Add your line here._
+- Release: the game is online at https://rather-die-than-get-fired.vercel.app (Vercel project `rather-die-than-get-fired`;
+  `vercel.json` + `.vercelignore` in the repo). Redeploy with `npx vercel@latest deploy --prod`.
+- Fix (UI): the loading-screen logo no longer overlaps the title logo on the first click.
 
 ## 0.3.0 — 2026-10-17 — "Rather Die Than Get Fired"
 

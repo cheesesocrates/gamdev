@@ -7,3 +7,8 @@ Kenney Game Assets All-in-1 3.7.0/
 Kenney Game Assets All-in-1 3.7.0.zip
 assets_src/
 *.tsbuildinfo
+
+# Vercel CLI project link
+.vercel
+
+.vercel
