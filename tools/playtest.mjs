@@ -330,6 +330,82 @@ try {
     await shot("l01-locked");
   }
 
+  // Open-Plan Office: the dodge is a short dash through walls. Never out of the building, never into the locked room or furniture.
+  if (scenario === "phase") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    await ev(() => {
+      const h = window.__HT, s = h.scene, v = s.vault;
+      for (let k = 0; k < 60 && v.room.name !== "Marketing Lounge"; k++) v.setupDay(s.dayCfg.chores);
+      h.give("phasedash", 1);
+      h.god(true);
+    });
+    // Real dashes through the player code: stand somewhere, face a way, press Space.
+    const T = 64;
+    const cases = [
+      { name: "drywall north into the Executive Suite", x: 5.5 * T, y: 13.3 * T, key: "KeyW" },
+      { name: "concrete east into the Server Core", x: 23.6 * T, y: 24.5 * T, key: "KeyD" },
+      { name: "the locked lounge door", x: 58.5 * T, y: 13.3 * T, key: "KeyW" },
+      { name: "the locked lounge wall", x: 56.5 * T, y: 13.3 * T, key: "KeyW" },
+      { name: "the outer wall", x: 7 * T, y: 1.35 * T, key: "KeyW" },
+      { name: "past a break table (west wing)", x: 11 * T, y: 26.5 * T, key: "KeyD" },
+      { name: "through a desk pod (west wing)", x: 3.0 * T, y: 20.5 * T, key: "KeyW" },
+      // Starting inside a desk (can't happen in play, but the dash must still never throw you across the map).
+      { name: "from inside a desk toward the locked lounge", x: 0, y: 0, key: "KeyW", inDesk: true }
+    ];
+    for (const c of cases) {
+      const start = await ev((cc) => {
+        const s = window.__HT.scene;
+        const q = { x: cc.x, y: cc.y };
+        if (cc.inDesk) {
+          const d = s.props.list.find((p) => p.f.key.startsWith("ws_") && p.f.y < 20 * 64 && p.f.x > 44 * 64);
+          q.x = d.f.x; q.y = d.f.y;
+        } else s.world.resolveCircle(q, s.player.r);
+        s.player.x = q.x; s.player.y = q.y; s.player.vx = s.player.vy = 0;
+        return q;
+      }, c);
+      c.x = start.x; c.y = start.y;
+      await sleep(250);
+      // Aim the dash with the key, then let go: what's measured is where the dash alone put you.
+      await page.keyboard.down(c.key);
+      await sleep(30);
+      await page.keyboard.press("Space");
+      await sleep(40);
+      await page.keyboard.up(c.key);
+      if (c.name.startsWith("drywall")) await shot("ph01-mid-dash");
+      await sleep(350);
+      const r = await ev((cc) => {
+        const s = window.__HT.scene, p = s.player, w = s.world;
+        const z = s.zoneAt(p.x, p.y);
+        return { name: cc.name, from: [Math.round(cc.x), Math.round(cc.y)], to: [Math.round(p.x), Math.round(p.y)], moved: Math.round(Math.hypot(p.x - cc.x, p.y - cc.y)), zone: z >= 0 ? s.map.zones[z].name : "(wall!)", free: w.circleFree(p.x, p.y, p.r - 1), locked: s.inLockedRoom(p.x, p.y) };
+      }, c);
+      console.log("dash", JSON.stringify(r));
+    }
+    await shot("ph02-after");
+    // Fuzz: thousands of dashes from random open spots in random directions.
+    const fuzz = await ev(() => {
+      const s = window.__HT.scene, w = s.world, r = s.player.r;
+      let n = 0, bad = [], walls = 0, maxD = 0;
+      for (let k = 0; k < 4000; k++) {
+        const x = 64 + Math.random() * (64 * 62), y = 64 + Math.random() * (64 * 44);
+        if (!w.circleFree(x, y, r) || s.inLockedRoom(x, y)) continue;
+        const a = Math.random() * Math.PI * 2;
+        const e = s.phasePath(x, y, Math.cos(a), Math.sin(a), r, 115, 80);
+        n++;
+        const d = Math.hypot(e.x - x, e.y - y);
+        maxD = Math.max(maxD, d);
+        const tx = Math.floor(e.x / 64), ty = Math.floor(e.y / 64);
+        const ok = w.circleFree(e.x, e.y, r) && !s.inLockedRoom(e.x, e.y) && tx >= 1 && ty >= 1 && tx <= 62 && ty <= 44 && d <= 195.5;
+        // Crossed a wall? (sampled straight line from start to end touches a non-floor tile)
+        for (let t = 0; t <= 1; t += 0.05) if (!w.isFloorAt(x + (e.x - x) * t, y + (e.y - y) * t)) { walls++; break; }
+        if (!ok && bad.length < 5) bad.push({ x: Math.round(x), y: Math.round(y), a: +a.toFixed(2), ex: Math.round(e.x), ey: Math.round(e.y) });
+      }
+      return { dashes: n, throughWalls: walls, maxDist: Math.round(maxD), bad };
+    });
+    console.log("phase fuzz", JSON.stringify(fuzz));
+  }
+
   // AI robots in a puddle: they short out, then blow up (hurting coworkers around them, never you).
   if (scenario === "robots") {
     await ev(() => { window.__HT.toFight(); });

@@ -24,6 +24,11 @@ export interface PlayerInput {
   cycle: number;
 }
 
+/** Open-Plan Office: a short, fast dash (a normal roll covers ~150 px) that may carry on to come out the far side of a wall. */
+const PHASE_LEN = 115;
+const PHASE_EXTRA = 80;
+const PHASE_TIME = 0.16;
+
 const STAPLER_BASE_MAG = 12;
 const COFFEE_BASE_CUPS = 8;
 const LASER_BATTERY = 100;
@@ -58,6 +63,13 @@ export class Player {
   rollDy = 0;
   dodgeCharges = 1;
   dodgeRecharge = 0;
+  /** Open-Plan Office: the wall-phasing dash in progress (a straight line, checked end to end when it started). */
+  private phase: { fx: number; fy: number; dist: number; s: number; speed: number } | null = null;
+  /** Mid Open-Plan Office dash: passing through walls and desks (they don't get shoved). */
+  get phasing() { return this.phase !== null; }
+  /** Where you see from: your position, except mid-phase inside a wall (then the last spot on open floor). */
+  eyeX: number;
+  eyeY: number;
 
   weapon: WeaponId = "stapler";
   fireCd = 0;
@@ -103,6 +115,8 @@ export class Player {
     this.g = g;
     this.x = x;
     this.y = y;
+    this.eyeX = x;
+    this.eyeY = y;
     this.shadow = g.add.image(x, y + 6, "shadow").setScale(0.9 * CHAR_SCALE);
     this.sprite = g.add.image(x, y, "char_hitman1_stand").setOrigin(0.42, 0.5).setScale(CHAR_SCALE);
     this.dodgeCharges = GameState.stats.dodgeCharges;
@@ -229,6 +243,7 @@ export class Player {
       this.rollDx = dx / len;
       this.rollDy = dy / len;
       this.rolling = 0.3;
+      if (st.phaseDash) this.startPhase();
       this.invuln = Math.max(this.invuln, 0.26);
       this.dodgeCharges--;
       this.rollHit = false;
@@ -262,9 +277,19 @@ export class Player {
           this.dodgeCharges = Math.min(st.dodgeCharges, this.dodgeCharges + 1);
         }
       }
-      const rs = 560 * (0.55 + this.rolling / 0.3 * 0.7);
-      this.vx = this.rollDx * rs;
-      this.vy = this.rollDy * rs;
+      if (this.phase) {
+        const ph = this.phase;
+        ph.s = Math.min(ph.dist, ph.s + ph.speed * dt);
+        this.x = ph.fx + this.rollDx * ph.s;
+        this.y = ph.fy + this.rollDy * ph.s;
+        this.vx = this.rollDx * ph.speed * 0.6;
+        this.vy = this.rollDy * ph.speed * 0.6;
+        if (this.rolling <= 0) this.finishDash();
+      } else {
+        const rs = 560 * (0.55 + this.rolling / 0.3 * 0.7);
+        this.vx = this.rollDx * rs;
+        this.vy = this.rollDy * rs;
+      }
       this.dodgeTrail();
     } else if (this.stun > 0) {
       this.vx *= Math.pow(0.02, dt);
@@ -284,10 +309,14 @@ export class Player {
         }
       }
     }
-    const p = { x: this.x, y: this.y };
-    g.world.moveCircle(p, this.r, this.vx * dt, this.vy * dt);
-    this.x = p.x;
-    this.y = p.y;
+    // Mid-phase the position comes from the dash path (walls don't apply); otherwise walk and collide.
+    if (!this.phase) {
+      const p = { x: this.x, y: this.y };
+      g.world.moveCircle(p, this.r, this.vx * dt, this.vy * dt);
+      this.x = p.x;
+      this.y = p.y;
+    }
+    if (g.world.isFloorAt(this.x, this.y)) { this.eyeX = this.x; this.eyeY = this.y; }
 
     // ---- hazards on the player
     this.environment(dt);
@@ -303,11 +332,64 @@ export class Player {
     if (this.sprite.texture.key !== tex) this.sprite.setTexture(tex);
     this.sprite.setPosition(this.x, this.y).setRotation(this.aim).setDepth(this.y + 4);
     const blink = this.invuln > 0 && this.rolling <= 0 && Math.floor(g.time.now / 70) % 2 === 0;
-    this.sprite.setAlpha(blink ? 0.35 : 1);
-    if (this.hurtFlash > 0) this.sprite.setTintFill(0xff4040); else if (this.stun > 0) this.sprite.setTint(0xffe27a); else this.sprite.clearTint();
+    this.sprite.setAlpha(this.phase ? 0.5 : blink ? 0.35 : 1);
+    if (this.hurtFlash > 0) this.sprite.setTintFill(0xff4040);
+    else if (this.phase) this.sprite.setTint(0x9fd8ff);
+    else if (this.stun > 0) this.sprite.setTint(0xffe27a);
+    else this.sprite.clearTint();
     const sq = this.rolling > 0 ? 0.82 : 1;
     this.sprite.setScale(sq * CHAR_SCALE, CHAR_SCALE);
     this.shadow.setPosition(this.x, this.y + 8).setDepth(this.y - 30);
+  }
+
+  /** Open-Plan Office: plan the dash through the walls ahead (GameScene.phasePath checks it end to end). */
+  private startPhase() {
+    const g = this.g;
+    const end = g.phasePath(this.x, this.y, this.rollDx, this.rollDy, this.r, PHASE_LEN, PHASE_EXTRA);
+    const dist = Math.hypot(end.x - this.x, end.y - this.y);
+    this.phase = { fx: this.x, fy: this.y, dist, s: 0, speed: Math.max(PHASE_LEN, dist) / PHASE_TIME };
+    this.rolling = PHASE_TIME;
+    g.audio.play("blink", { vol: 0.35, rate: 1.4 });
+    // A trail of fading after-images along the way.
+    for (let k = 1; k <= 4; k++) {
+      const f = k / 5;
+      const ghost = g.add.image(this.x + this.rollDx * dist * f, this.y + this.rollDy * dist * f, this.sprite.texture.key)
+        .setOrigin(0.42, 0.5).setScale(CHAR_SCALE).setRotation(this.aim).setTint(0x9fd8ff).setAlpha(0.45 * (1 - f * 0.5)).setDepth(this.y + 3);
+      g.tweens.add({ targets: ghost, alpha: 0, duration: 260 + k * 40, onComplete: () => ghost.destroy() });
+    }
+  }
+
+  /** Lands the phase dash at its (checked) end point. Also called when a phase ends early: the day is over, etc. */
+  finishDash() {
+    const ph = this.phase;
+    if (!ph) return;
+    const g = this.g;
+    this.phase = null;
+    this.rolling = 0;
+    const p = { x: ph.fx + this.rollDx * ph.dist, y: ph.fy + this.rollDy * ph.dist };
+    // Checked when the dash began; if the office changed under it since (a desk slid in), step out of the way,
+    // and if that doesn't work, go back to where the dash started (never anywhere further).
+    g.world.resolveCircle(p, this.r);
+    if (!g.world.circleFree(p.x, p.y, this.r - 1) || (g.inLockedRoom(p.x, p.y) && !g.inLockedRoom(ph.fx, ph.fy))) {
+      p.x = ph.fx;
+      p.y = ph.fy;
+      g.world.resolveCircle(p, this.r);
+    }
+    this.x = p.x;
+    this.y = p.y;
+    this.eyeX = p.x;
+    this.eyeY = p.y;
+    this.vx = this.rollDx * 180;
+    this.vy = this.rollDy * 180;
+    g.fx.burst("pixel", p.x, p.y, 8, 0x9fd8ff);
+  }
+
+  /** New day: forget any dash in progress. */
+  cancelDash() {
+    this.phase = null;
+    this.rolling = 0;
+    this.eyeX = this.x;
+    this.eyeY = this.y;
   }
 
   private footstep() {

@@ -101,7 +101,8 @@ export class Props {
       // Is the boss leaning on it?
       const cx = clamp(pl.x, f.x - f.w / 2, f.x + f.w / 2), cy = clamp(pl.y, f.y - f.h / 2, f.y + f.h / 2);
       const dx = pl.x - cx, dy = pl.y - cy;
-      if (dx * dx + dy * dy < (pl.r + 3) ** 2) {
+      // (A phase dash goes straight through: nothing gets shoved.)
+      if (!pl.phasing && dx * dx + dy * dy < (pl.r + 3) ** 2) {
         const horiz = Math.abs(dx) > Math.abs(dy);
         const nx = horiz ? -Math.sign(dx) : 0, ny = horiz ? 0 : -Math.sign(dy);
         const into = pl.vx * nx + pl.vy * ny;

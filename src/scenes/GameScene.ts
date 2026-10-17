@@ -427,6 +427,7 @@ export class GameScene extends Phaser.Scene {
     p.y = this.map.playerSpawn.y;
     p.vx = p.vy = 0;
     p.dead = false;
+    p.cancelDash();
     p.invuln = p.stun = p.rolling = p.slip = 0;
     p.tempHp = 0;
     p.shredBag = 0;
@@ -630,6 +631,8 @@ export class GameScene extends Phaser.Scene {
   private endCrunch(early: boolean) {
     // Clocking out early pays overtime at half rate: upgrades are meant to be scarce.
     const leftover = early ? Math.floor(Math.max(0, this.crunchLeft) / 2) : 0;
+    // Nobody waits out the review stuck halfway through a wall.
+    this.player.finishDash();
     this.mini?.close();
     this.mini = null;
     this.unzoomMini();
@@ -1399,6 +1402,48 @@ export class GameScene extends Phaser.Scene {
     if (!this.inLockedRoom(p.x, p.y)) return p;
     const lift = this.map.spawns.find((s) => s.kind === "elevator") ?? this.map.spawns[0];
     return this.world.nearestWalkable(lift.x, lift.y);
+  }
+
+  /**
+   * Open-Plan Office: where a wall-phasing dash from (x, y) along the unit vector (dx, dy) ends. It passes through
+   * interior walls (drywall, concrete, glass, elevator doors) and furniture, but stops at the building's outer walls,
+   * the locked door and the edge of the locked room. It never ends inside anything: a dash that would stop inside a
+   * wall or a desk carries on (up to `extra` px) to come out the far side, or falls back to the last open spot before it.
+   */
+  phasePath(x: number, y: number, dx: number, dy: number, r: number, len: number, extra: number): { x: number; y: number } {
+    const fromLocked = this.inLockedRoom(x, y);
+    let ex = x, ey = y;
+    for (let s = 2; s <= len + extra; s += 2) {
+      const px = x + dx * s, py = y + dy * s;
+      const k = this.phaseProbe(px, py, r, fromLocked);
+      if (k === "stop") break;
+      if (k === "open") {
+        ex = px;
+        ey = py;
+        if (s >= len) break;
+      }
+    }
+    return { x: ex, y: ey };
+  }
+
+  /** One step of a phase dash: open floor, inside a wall or a desk (keep going), or a hard stop. Uses the circle's bounding box (conservative). */
+  private phaseProbe(px: number, py: number, r: number, fromLocked: boolean): "open" | "wall" | "stop" {
+    const tx0 = Math.floor((px - r) / TILE), tx1 = Math.floor((px + r) / TILE);
+    const ty0 = Math.floor((py - r) / TILE), ty1 = Math.floor((py + r) / TILE);
+    const locked = fromLocked ? -1 : this.vault.lockedZone;
+    let wall = false;
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        // The outer walls are the edge of the building: never out of bounds.
+        if (tx <= 0 || ty <= 0 || tx >= MAP_W - 1 || ty >= MAP_H - 1) return "stop";
+        const t = this.world.tile(tx, ty);
+        if (t === Tile.LOCKED) return "stop";
+        if (locked >= 0 && this.map.zoneGrid[ty * MAP_W + tx] === locked) return "stop";
+        if (t !== Tile.FLOOR) wall = true;
+      }
+    }
+    if (!wall) this.world.queryBox(px - r, py - r, px + r, py + r, (c) => { if (c.solid && c.alive) wall = true; });
+    return wall ? "wall" : "open";
   }
 
   /** Somewhere for a coworker to wander off to before 5 PM (never the locked room). */

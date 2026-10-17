@@ -71,6 +71,8 @@ export interface Stats {
   wetFloor: boolean;
   sticky: number;
   ninja: boolean;
+  /** Open-Plan Office: the dodge is a short dash that phases through walls. */
+  phaseDash: boolean;
   deskJockey: number;
   handshake: number;
   blame: boolean;
@@ -263,6 +265,7 @@ class GameStateClass {
       wetFloor: s("wetfloor") > 0,
       sticky: s("sticky"),
       ninja: s("ninja") > 0,
+      phaseDash: s("phasedash") > 0,
       deskJockey: s("deskjockey"),
       handshake: s("handshake"),
       blame: s("blame") > 0,

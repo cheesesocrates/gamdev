@@ -54,6 +54,13 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Gameplay: coworkers can't stand inside each other or inside you any more. They push each other apart (bosses and
   riot shields stand their ground), step out of your way, and are never shoved into a wall or a desk. A charging boss
   still ploughs through people, and a dodge-roll still slips through a crowd.
+- Gameplay: new upgrade **Open-Plan Office** (rare): your dodge becomes a quick, shorter dash (about 115 px instead
+  of the roll's 150) that phases straight through interior walls (drywall, concrete, glass) and desks, with a trail of
+  ghostly after-images. The whole path is checked before you move, so it can't go wrong: it stops at the building's
+  outer walls, at the code-locked door and at the edge of the locked room (you can't phase in there), and it never
+  ends inside a wall or a desk: it carries on to come out the far side or stops at the last open spot. You see from
+  the open floor while you're inside a wall, and a dash that's still going when the day's crunch ends is landed
+  first. Tested with 4,000 random dashes all over the office.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.

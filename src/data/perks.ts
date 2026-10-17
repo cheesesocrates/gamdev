@@ -76,6 +76,7 @@ export const PERKS: PerkDef[] = [
   { id: "wetfloor", name: "Wet Floor Sign", desc: "Your dodge roll leaves a slippery puddle behind you.", rarity: "rare", cost: 14, max: 1, icon: "wetfloor" },
   { id: "sticky", name: "Sticky Notes", desc: "Hits stick notes on coworkers. Three notes and they freeze, confused. (2nd stack: two notes.)", rarity: "rare", cost: 16, max: 2, icon: "sticky" },
   { id: "ninja", name: "Cubicle Ninja", desc: "Rolling through a coworker staggers them and gives the dodge back.", rarity: "rare", cost: 16, max: 1, icon: "ninja" },
+  { id: "phasedash", name: "Open-Plan Office", desc: "Your dodge becomes a quick, shorter dash that phases straight through walls and desks.", rarity: "rare", cost: 18, max: 1, icon: "phasedash" },
   { id: "deskjockey", name: "Desk Jockey", desc: "Shoved desks and tables fly faster and hit three times as hard.", rarity: "rare", cost: 12, max: 1, icon: "deskjockey" },
   { id: "handshake", name: "Golden Handshake", desc: "Every 4th firing banks +2s of Overtime.", rarity: "rare", cost: 18, max: 2, icon: "handshake" },
   { id: "blame", name: "Blame Game", desc: "Whoever hits you becomes the scapegoat. Every coworker nearby turns on them.", rarity: "epic", cost: 26, max: 1, icon: "blame" },
