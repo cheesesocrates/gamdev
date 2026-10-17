@@ -316,11 +316,12 @@ export class UI {
     });
   }
 
-  setQuota(fired: number, quota: number) {
-    this.set("quota", `${fired}|${quota}`, () => {
+  /** `bossLeft`: the quota is met but today's boss is still on the floor. */
+  setQuota(fired: number, quota: number, bossLeft = false) {
+    this.set("quota", `${fired}|${quota}|${bossLeft}`, () => {
       const q = $(".h-quota", this.root);
-      $(".ql span", q).innerHTML = `FIRED <b>${Math.min(fired, quota)}</b> / ${quota}`;
-      ($(".bar i", q)).style.width = `${Math.min(100, (fired / quota) * 100)}%`;
+      $(".ql span", q).innerHTML = bossLeft ? `QUOTA MET: <b>FIRE THE BOSS</b>` : `FIRED <b>${Math.min(fired, quota)}</b> / ${quota}`;
+      ($(".bar i", q)).style.width = `${Math.min(100, (fired / Math.max(1, quota)) * 100)}%`;
       if (fired > 0) gsap.fromTo($(".ql", q), { scale: 1.15 }, { scale: 1, duration: 0.3, ease: "back.out(3)" });
     });
   }

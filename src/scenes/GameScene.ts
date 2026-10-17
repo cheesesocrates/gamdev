@@ -873,6 +873,7 @@ export class GameScene extends Phaser.Scene {
 
   private dayClear() {
     this.phase = "dayclear";
+    this.syncQuota();
     this.fx.slowmo(0.3, 1.4);
     this.player.invuln = 99;
     this.player.setArmed(false);
@@ -1181,6 +1182,7 @@ export class GameScene extends Phaser.Scene {
     this.fired++;
     GameState.totalFired++;
     GameState.dayStats.fired++;
+    if (this.phase === "downsizing") this.syncQuota();
 
     // Golden Handshake: every 4th firing pays a little overtime.
     if (byPlayer && st.handshake && ++this.handshakeCount % 4 === 0) {
@@ -1990,7 +1992,13 @@ export class GameScene extends Phaser.Scene {
       this.ui.setChores(items, "");
       this.ui.setClockout(this.allChoresDone(), this.crunchLeft);
     }
-    if (this.phase === "downsizing") this.ui.setQuota(this.fired, this.quota);
+    if (this.phase === "downsizing" || this.phase === "dayclear") this.syncQuota();
+  }
+
+  /** The FIRED x / y bar. Also called on every firing and at the end of the day, so the last one always shows. */
+  private syncQuota() {
+    const boss = this.waves.boss;
+    this.ui.setQuota(this.fired, this.quota, this.fired >= this.quota && !!boss && !boss.dead);
   }
 
   private updateHudFast(dt: number) {

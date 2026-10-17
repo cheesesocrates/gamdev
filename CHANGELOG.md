@@ -18,6 +18,9 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - UI: a bought upgrade clipboard is stamped **APPROVED** (not "HIRED"), its price tag disappears and the whole card
   greys out, so it no longer looks like something you can buy again. A bought gun slip loses its price tag too. An
   offer you already have every stack of shows as MAXED.
+- Fix (UI): the FIRED x / y bar sometimes stayed one short (e.g. 9 / 10 under "QUOTA MET"): the last firing ended the
+  day before the HUD caught up. It now updates on every firing and at the end of the day. When the quota is met but
+  the boss is still standing, it says "QUOTA MET: FIRE THE BOSS" instead of looking finished.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.
