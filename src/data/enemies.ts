@@ -1,5 +1,8 @@
-export type EnemyType = "intern" | "fulltime" | "accountant" | "manager" | "hr" | "burnout" | "robot" | "consultant" | "hatchet" | "caller";
-export type BossKind = "consultant" | "hatchet" | "caller";
+export type EnemyType = "intern" | "fulltime" | "accountant" | "manager" | "hr" | "burnout" | "robot" | "consultant" | "hatchet" | "caller" | "ceo";
+export type BossKind = "consultant" | "hatchet" | "caller" | "ceo";
+
+/** The bosses a run draws its day-3 and day-6 visitors from (the CEO always closes a run on day 9). */
+export const BOSS_POOL: EnemyType[] = ["hatchet", "caller", "consultant"];
 
 export interface RangedDef {
   kind: "calc" | "memo" | "bolt" | "phone";
@@ -54,8 +57,13 @@ export const BOSS_INFO: Record<BossKind, { sub: string; pa: string; memo: string
   },
   consultant: {
     sub: "has been brought in to 'optimize headcount'",
-    pa: "Attention all staff. An external consultant has arrived to optimize headcount.",
+    pa: "Attention all staff. An external consultant has arrived to optimize headcount. His interns protect him.",
     memo: "a consultant is optimizing headcount"
+  },
+  ceo: {
+    sub: "wants a word about your performance",
+    pa: "This is your CEO speaking. I will be handling this one personally.",
+    memo: "the CEO is reviewing you personally"
   }
 };
 
@@ -91,20 +99,28 @@ export const ENEMIES: Record<EnemyType, EnemyDef> = {
     sprites: ["robot1_machine", "robot2_machine"], scale: 1.05, melee: 1, dodgy: true, smart: true, robot: true,
     ranged: { kind: "bolt", dmg: 1, speed: 620, cooldown: 1.25, range: 640, count: 1, spread: 0, keepDist: [260, 420] }
   },
+  // Brings interns who shield him ("synergy": he takes a quarter damage while they're near), sprays memos, and below
+  // half health spins round and fires a full ring of them ("PIVOT!").
   consultant: {
     type: "consultant", title: "THE CONSULTANT", hp: 1750, speed: 115, radius: 30,
     sprites: ["hitman2_hold"], scale: 2.1, melee: 2, boss: true, bossKind: "consultant", smart: true, tint: 0xffd7a8, held: "p_memo", heldScale: 0.9,
     ranged: { kind: "memo", dmg: 1, speed: 300, cooldown: 2.6, range: 700, count: 9, spread: 0.18, keepDist: [160, 360] }
   },
-  // Day 3 (and every 9 days after): charges in a straight line through walls, glass and desks.
+  // A day-3 or day-6 boss: charges in a straight line through walls, glass and desks.
   hatchet: {
     type: "hatchet", title: "THE HATCHET MAN", hp: 1500, speed: 118, radius: 30,
     sprites: ["hitman1_hold"], scale: 2.15, melee: 2, boss: true, bossKind: "hatchet", smart: true, tint: 0xf3c2b4, held: "i_stamp", heldScale: 0.62
   },
-  // Day 6 (and every 9 days after): keeps its distance and lobs ringing desk phones that explode.
+  // A day-3 or day-6 boss: keeps its distance and lobs ringing desk phones that explode.
   caller: {
     type: "caller", title: "THE COLD CALLER", hp: 1350, speed: 104, radius: 28,
     sprites: ["manBlue_hold"], scale: 2.0, melee: 2, boss: true, bossKind: "caller", smart: true, tint: 0xd2e2ff, held: "i_phone", heldScale: 0.6,
     ranged: { kind: "phone", dmg: 2, speed: 0, cooldown: 2.3, range: 820, count: 1, spread: 0, keepDist: [300, 500] }
+  },
+  // Day 9 (and every 9th day in endless): three phases. Quarterly Review (coin fans, golden-parachute leaps),
+  // Restructuring (security on call, double fans, leaps that scatter coins) and Liquidation (burning reports, the office on fire).
+  ceo: {
+    type: "ceo", title: "THE CEO", hp: 2400, speed: 100, radius: 34,
+    sprites: ["manOld_hold"], scale: 2.5, melee: 2, boss: true, bossKind: "ceo", smart: true, tint: 0xffe6b0, held: "i_briefcase", heldScale: 0.62
   }
 };

@@ -1,6 +1,10 @@
 import { PERKS, PERK_BY_ID, PerkDef, RARITY_RANK, RARITY_WEIGHT, Rarity } from "../data/perks";
 import { CRUNCH_SECONDS } from "../config";
 import { WEAPONS, WeaponId } from "../data/weapons";
+import { BOSS_POOL, EnemyType } from "../data/enemies";
+
+/** A run is nine days: bosses on days 3 and 6, the CEO on day 9. Then you can cash out, or keep going (endless). */
+export const RUN_DAYS = 9;
 
 const lockedArsenal = () => Object.fromEntries(WEAPONS.map((w) => [w, w === "stapler"])) as Record<WeaponId, boolean>;
 import { shuffle } from "../util/math";
@@ -114,8 +118,17 @@ class GameStateClass {
   totalFired = 0;
   dayStats: DayStats = freshDayStats();
   stats: Stats = this.computeStats();
+  /** Past day 9: the run goes on for as long as you last. */
+  endless = false;
+  /** Which boss visits on which day this run (decided up front so tomorrow's memo always matches). */
+  private bossPlan = new Map<number, EnemyType>();
 
   reset() {
+    this.endless = false;
+    this.bossPlan = new Map();
+    const pool = shuffle([...BOSS_POOL]);
+    this.bossPlan.set(3, pool[0]);
+    this.bossPlan.set(6, pool[1]);
     this.day = 1;
     this.bank = 0;
     this.stacks = {};
@@ -132,6 +145,22 @@ class GameStateClass {
     // A good night's sleep heals half your missing health (rounded up).
     const missing = this.stats.maxHp - this.hp;
     this.hp = Math.min(this.stats.maxHp, this.hp + Math.ceil(missing / 2) + 2);
+  }
+
+  /**
+   * The boss on a boss day (every third day): the CEO on day 9 and every ninth day after; otherwise one of the
+   * pool, never the same as the boss before it.
+   */
+  bossFor(day: number): EnemyType {
+    if (day % 9 === 0) return "ceo";
+    let b = this.bossPlan.get(day);
+    if (!b) {
+      const prev = this.bossPlan.get(day - 3);
+      const pool = BOSS_POOL.filter((t) => t !== prev);
+      b = pool[Math.floor(Math.random() * pool.length)];
+      this.bossPlan.set(day, b);
+    }
+    return b;
   }
 
   crunchSeconds() {

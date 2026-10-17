@@ -7,7 +7,7 @@ import { Tile } from "../world/OfficeMap";
 import type { GameScene } from "../scenes/GameScene";
 import type { Enemy } from "./Enemy";
 
-export type ProjKind = "staple" | "coffee" | "shard" | "calc" | "memo" | "bolt" | "wave" | "plane" | "confetti" | "drop" | "slip" | "toner" | "phone";
+export type ProjKind = "staple" | "coffee" | "shard" | "calc" | "memo" | "bolt" | "wave" | "plane" | "confetti" | "drop" | "slip" | "toner" | "phone" | "coin" | "report";
 export type PlayerShot = "staple" | "coffee" | "shard" | "plane" | "confetti" | "drop" | "slip";
 
 const SHOT: Record<PlayerShot, { speed: number; dmg: number; range: number; radius: number }> = {
@@ -62,8 +62,11 @@ export interface Proj {
 
 const TEX: Record<ProjKind, string> = {
   staple: "p_staple", coffee: "p_coffee", shard: "p_staple", calc: "p_calc", memo: "p_memo", bolt: "p_bolt", wave: "p_wave",
-  plane: "p_plane", confetti: "p_confetti", drop: "p_drop", slip: "p_slip", toner: "p_toner", phone: "i_phone"
+  plane: "p_plane", confetti: "p_confetti", drop: "p_drop", slip: "p_slip", toner: "p_toner", phone: "i_phone", coin: "p_coin", report: "p_report"
 };
+
+/** Enemy shots that arc over the furniture and go off where they land (the Cold Caller's phones, the CEO's burning reports). */
+const lobbed = (p: Proj) => !p.friendly && (p.kind === "phone" || p.kind === "report");
 
 export class Projectiles {
   g: GameScene;
@@ -169,10 +172,19 @@ export class Projectiles {
    * on the floor for a second before it blows. Swat it back with the keyboard and it's yours.
    */
   lobPhone(x: number, y: number, tx: number, ty: number, owner: Enemy | null): Proj {
+    return this.lob("phone", x, y, tx, ty, owner);
+  }
+
+  /** The CEO's burning budget report: lands, bursts into flames. Swat it back and it burns them instead. */
+  lobReport(x: number, y: number, tx: number, ty: number, owner: Enemy | null): Proj {
+    return this.lob("report", x, y, tx, ty, owner);
+  }
+
+  private lob(kind: "phone" | "report", x: number, y: number, tx: number, ty: number, owner: Enemy | null): Proj {
     const p = this.obtain();
     p.friendly = false;
     p.owner = owner;
-    p.kind = "phone";
+    p.kind = kind;
     p.x = x;
     p.y = y;
     const dist = Math.max(40, Math.hypot(tx - x, ty - y));
@@ -193,7 +205,7 @@ export class Projectiles {
     p.spin = 11;
     p.stun = 0;
     p.trail = 0;
-    p.sprite.setTexture("i_phone").setScale(1).setRotation(ang);
+    p.sprite.setTexture(TEX[kind]).setScale(1).setRotation(ang);
     return p;
   }
 
@@ -217,7 +229,7 @@ export class Projectiles {
     p.sprite.setTint(0xe9c25a);
   }
 
-  fireEnemy(kind: "calc" | "memo" | "bolt" | "wave", x: number, y: number, angle: number, speed: number, dmg: number, owner: Enemy | null = null) {
+  fireEnemy(kind: "calc" | "memo" | "bolt" | "wave" | "coin", x: number, y: number, angle: number, speed: number, dmg: number, owner: Enemy | null = null) {
     const p = this.obtain();
     p.friendly = false;
     p.owner = owner;
@@ -228,13 +240,13 @@ export class Projectiles {
     p.vy = Math.sin(angle) * speed;
     p.dmg = dmg;
     p.range = kind === "wave" ? 300 : 900;
-    p.radius = kind === "wave" ? 22 : kind === "calc" ? 9 : 7;
+    p.radius = kind === "wave" ? 22 : kind === "calc" || kind === "coin" ? 9 : 7;
     p.pierce = 0;
     p.bounces = 0;
     p.homing = 0;
     p.explode = 0;
     p.canSplit = false;
-    p.spin = kind === "calc" ? rand(10, 16) * (Math.random() < 0.5 ? -1 : 1) : kind === "memo" ? rand(4, 7) : 0;
+    p.spin = kind === "calc" || kind === "coin" ? rand(10, 16) * (Math.random() < 0.5 ? -1 : 1) : kind === "memo" ? rand(4, 7) : 0;
     p.stun = kind === "wave" ? 0.85 : 0;
     p.trail = 0;
     p.sprite.setTexture(TEX[kind]).setScale(kind === "wave" ? 1.3 : 1).setRotation(angle);
@@ -288,7 +300,7 @@ export class Projectiles {
       }
       for (let s = 0; s < steps && alive; s++) {
         const nx = p.x + p.vx * sdt, ny = p.y + p.vy * sdt;
-        const lob = p.kind === "toner" || (p.kind === "phone" && !p.friendly);
+        const lob = p.kind === "toner" || lobbed(p);
         const hit = p.returning ? null : lob ? this.wallAt(nx, ny) : g.world.shotBlockedAt(nx, ny);
         if (hit) {
           alive = this.onSolid(p, nx, ny, hit, sdt);
@@ -306,7 +318,7 @@ export class Projectiles {
           }
           alive = false; this.expire(p); break;
         }
-        if (p.kind !== "toner" && !(p.kind === "phone" && !p.friendly)) alive = p.friendly ? this.hitEnemies(p) : this.hitPlayerSide(p);
+        if (p.kind !== "toner" && !lobbed(p)) alive = p.friendly ? this.hitEnemies(p) : this.hitPlayerSide(p);
       }
       if (!alive) { this.kill(p); continue; }
 
@@ -314,7 +326,7 @@ export class Projectiles {
       if (p.spin) p.sprite.rotation += p.spin * dt;
       else p.sprite.setRotation(Math.atan2(p.vy, p.vx));
       if (p.kind === "coffee" || p.kind === "drop") p.sprite.setAlpha(Math.min(1, p.range / 80));
-      if (p.kind === "toner" || (p.kind === "phone" && !p.deflected)) p.sprite.setScale(1 + Math.sin((1 - p.range / p.maxRange) * Math.PI) * 0.8);
+      if (p.kind === "toner" || ((p.kind === "phone" || p.kind === "report") && !p.deflected)) p.sprite.setScale(1 + Math.sin((1 - p.range / p.maxRange) * Math.PI) * 0.8);
       if (p.kind === "wave") p.sprite.setScale(1.3 + (300 - p.range) / 160).setAlpha(Math.min(1, p.range / 120));
       p.trail -= dt;
       if (p.trail <= 0 && (p.kind === "bolt" || (p.friendly && (p.homing || p.explode)))) {
@@ -362,6 +374,7 @@ export class Projectiles {
     if (p.vortex) { p.vortex = false; g.vortex(x, y); }
     if (p.kind === "toner") { g.tonerBlast(x, y); return; }
     if (p.kind === "phone") { g.phoneLanded(x, y, p.friendly, p.owner); return; }
+    if (p.kind === "report") { g.reportLanded(x, y, p.friendly); return; }
     if (p.kind === "drop") {
       g.fx.burst("water", x, y, 2);
       if (chance(0.14)) g.hazards.addWater(g.hazards.idx(x - Math.cos(angle) * 10, y - Math.sin(angle) * 10));
@@ -390,6 +403,7 @@ export class Projectiles {
     if (p.vortex) { p.vortex = false; this.g.vortex(p.x, p.y); }
     if (p.kind === "toner") { this.g.tonerBlast(p.x, p.y); return; }
     if (p.kind === "phone") { this.g.phoneLanded(p.x, p.y, p.friendly, p.owner); return; }
+    if (p.kind === "report") { this.g.reportLanded(p.x, p.y, p.friendly); return; }
     if (p.kind === "drop") {
       if (chance(0.07)) this.g.hazards.addWater(this.g.hazards.idx(p.x, p.y));
       return;
@@ -401,7 +415,7 @@ export class Projectiles {
   private hitEnemies(p: Proj): boolean {
     const g = this.g;
     for (const e of g.enemies) {
-      if (e.dead || !e.hostile || p.hit.has(e.id)) continue;
+      if (e.dead || !e.hostile || p.hit.has(e.id) || e.untargetable) continue;
       const rr = e.r + p.radius;
       const dx = e.x - p.x, dy = e.y - p.y;
       if (dx * dx + dy * dy > rr * rr) continue;
@@ -427,8 +441,9 @@ export class Projectiles {
       const spray = p.kind === "drop" || p.kind === "confetti";
       const killed = g.hitEnemy(e, p.dmg, { angle: ang, kind: p.deflected ? "deflect" : p.kind, x: p.x, y: p.y, knock: KNOCK[p.kind] ?? 120, silent: spray });
       if (p.kind === "drop") e.soaked = Math.max(e.soaked, 4);
-      // A swatted-back phone goes off in their face.
+      // A swatted-back phone (or burning report) goes off in their face.
       if (p.kind === "phone") { g.phoneLanded(p.x, p.y, true, null); return false; }
+      if (p.kind === "report") { g.reportLanded(p.x, p.y, true); return false; }
       if (p.vortex) { p.vortex = false; g.vortex(p.x, p.y); }
       if (spray) g.audio.play("hit", { vol: 0.12, rate: 1.5, minGap: 70 });
       if (p.explode > 0) g.explosion(p.x, p.y, 55 + p.explode * 20, p.dmg * 0.75, { friendly: true, small: true, skip: e });

@@ -516,6 +516,29 @@ function makeTextures(scene: Phaser.Scene) {
     ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(7, 3, 16, 1.4);
   });
 
+  // The CEO's bonus cheques, thrown in fans: gold coins.
+  canvasTexture(scene, "p_coin", 18, 18, (ctx) => {
+    ctx.fillStyle = "#7a5a14"; ctx.beginPath(); ctx.arc(9, 9, 8.5, 0, Math.PI * 2); ctx.fill();
+    const g = ctx.createRadialGradient(7, 6, 1, 9, 9, 8);
+    g.addColorStop(0, "#fff2b0"); g.addColorStop(0.55, "#f0c040"); g.addColorStop(1, "#b98a1c");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(9, 9, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#8a6514"; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(9, 9, 4.6, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = "#8a6514"; ctx.fillRect(8.2, 4.5, 1.6, 9);
+  });
+
+  // The CEO's last resort: a budget report on fire, lobbed like a grenade.
+  canvasTexture(scene, "p_report", 30, 30, (ctx) => {
+    ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fillRect(5, 11, 20, 16);
+    ctx.fillStyle = "#fbf8ee"; ctx.fillRect(3, 9, 20, 16);
+    ctx.strokeStyle = "#1c1d21"; ctx.lineWidth = 1.5; ctx.strokeRect(3.5, 9.5, 19, 15);
+    ctx.fillStyle = "#c4382c"; ctx.fillRect(6, 12, 9, 2.5);
+    ctx.fillStyle = "#9aa3b0"; for (let l = 0; l < 3; l++) ctx.fillRect(6, 16.5 + l * 2.6, 13, 1.2);
+    const f = ctx.createLinearGradient(0, 2, 0, 16);
+    f.addColorStop(0, "#ffe08a"); f.addColorStop(0.6, "#ff8a2a"); f.addColorStop(1, "#d8432a");
+    ctx.fillStyle = f;
+    ctx.beginPath(); ctx.moveTo(15, 14); ctx.quadraticCurveTo(14, 7, 20, 2); ctx.quadraticCurveTo(21, 8, 26, 9); ctx.quadraticCurveTo(28, 14, 23, 16); ctx.closePath(); ctx.fill();
+  });
+
   // The Hatchet Man's giant FIRED stamp (top-down).
   canvasTexture(scene, "i_stamp", 30, 26, (ctx) => {
     ctx.fillStyle = "#7d1f17"; ctx.fillRect(2, 5, 26, 16);

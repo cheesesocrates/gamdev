@@ -375,3 +375,27 @@ kbd { display: inline-block; min-width: 1.4em; padding: 1px 5px 0; border: 2px s
 .m-quota { margin: 14px 0 6px; padding-right: 170px; font-size: 22px; opacity: .7; }
 .m-quota b { font-weight: 400; opacity: 1; }
 .m-stamp { position: absolute; right: 18px; bottom: 16px; padding: 6px 12px 3px; border: 4px solid var(--c-red); border-radius: 6px; color: var(--c-red); font: 400 30px/1 var(--f-display); transform: rotate(-10deg); opacity: .9; }
+
+/* ---------------------------------------------------------------- cutscene: letterbox + dialogue */
+#cutscene { padding: 0; display: block; cursor: pointer; }
+#cutscene > * { margin: 0; }
+#cutscene .cs-bar { position: absolute; left: 0; right: 0; height: 11vh; background: #050506; pointer-events: none; }
+#cutscene .cs-bar.top { top: 0; }
+#cutscene .cs-bar.bottom { bottom: 0; }
+#cutscene .cs-box { position: absolute; left: 0; right: 0; bottom: 14vh; width: min(780px, 92vw); margin: 0 auto; padding: 16px 24px 14px; background: rgba(28, 29, 33, .94); border: 3px solid #000; border-left: 10px solid var(--c-yellow); border-radius: 6px; box-shadow: 0 10px 0 #000; }
+#cutscene .cs-name { display: inline-block; padding: 5px 9px 4px; border-radius: 3px; background: var(--c-yellow); color: var(--c-ink); font: 400 20px/1 var(--f-display); letter-spacing: 2px; }
+#cutscene .cs-line { min-height: 2.3em; margin: 12px 0 6px; color: var(--c-paper); font: 400 clamp(24px, 3.2vw, 36px)/1.15 var(--f-display); }
+#cutscene .cs-hint { color: var(--c-cream); font: 400 17px/1 var(--f-display); opacity: .55; animation: blink 1.2s steps(2) infinite; text-align: right; }
+#cutscene .cs-skip { position: absolute; right: 22px; top: calc(11vh + 14px); }
+
+/* ---------------------------------------------------------------- end of the run: letter of promotion */
+#runend { background: radial-gradient(ellipse at 50% 40%, rgba(233, 194, 90, .38), rgba(20, 21, 24, .94) 70%); }
+.re { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.re-letter { position: relative; width: min(480px, 90vw); padding: 22px 24px 24px; background: var(--c-paper); border: 3px solid var(--c-ink); border-radius: 3px; box-shadow: 0 9px 0 var(--c-ink); transform: rotate(1.5deg); }
+.re-letter h5 { margin: 0 0 8px; font: 400 26.3px/1.3 var(--f-display); text-align: center; }
+.re-letter .re-sub { margin: 0 0 12px; font-size: 19px; line-height: 1.2; text-align: center; opacity: .75; }
+.re-letter .row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0 6px; border-bottom: 2px dashed rgba(28, 29, 33, .3); font-size: 20px; }
+.re-letter .row span:first-child { opacity: .6; }
+.re-letter { padding-bottom: 58px; }
+.re-letter .stamp { position: absolute; right: 16px; bottom: 8px; padding: 9px 13px 7px; border: 6px solid var(--c-green); border-radius: 8px; color: var(--c-green); font: 400 46px/1 var(--f-display); background: rgba(247, 244, 234, .92); transform: rotate(-9deg); }
+.re-q { color: var(--c-paper); font: 400 26px/1.2 var(--f-display); text-align: center; text-shadow: 0 3px 0 rgba(0, 0, 0, .5); }

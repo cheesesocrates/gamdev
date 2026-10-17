@@ -6,13 +6,20 @@ const HATCHET_BARKS = ["YOU'RE DONE!", "CLEAR YOUR DESK!", "RESTRUCTURING!", "NO
 const CALLER_BARKS = ["CAN YOU HEAR ME NOW?", "LET'S CIRCLE BACK!", "PER MY LAST CALL...", "HOLD, PLEASE!", "IT'S FOR YOU!"];
 import { HOSTILE_BARKS, NPC_IDLE } from "../data/lines";
 import { GameState } from "../systems/GameState";
-import { angleDiff, chance, pick, rand } from "../util/math";
+import { angleDiff, chance, clamp, lerp, pick, rand } from "../util/math";
 import { findPath } from "../world/Nav";
 import type { GameScene } from "../scenes/GameScene";
 
 let NEXT_ID = 1;
 
 const RUSH_BARKS = ["NOW!", "CHARGE!", "GET THE BOSS!", "FOR THE PENSION!", "OVERTIME THIS!", "RELOADING! GO!"];
+
+/** The CEO's golden-parachute leap: crouch, fly, land (seconds into the leap), and the shockwave's radius. */
+const LEAP_UP = 0.25, LEAP_LAND = 0.85, LEAP_END = 1.15;
+export const CEO_LEAP_R = 150;
+/** The CEO can't be rushed: each phase holds until its share of his health is gone. */
+const CEO_FLOORS = [0.66, 0.33, 0];
+export const CEO_PHASES = ["QUARTERLY REVIEW", "RESTRUCTURING", "LIQUIDATION"];
 
 type Mode = "npc" | "hostile" | "ally";
 
@@ -107,6 +114,27 @@ export class Enemy {
   private panicA = 0;
   allyLife = 0;
   spawnGrace = 0;
+  /** An intern the Consultant brought in (they shield him while they're close). */
+  summoner: Enemy | null = null;
+  /** THE CONSULTANT: how many of his interns are close enough to shield him right now. */
+  synergy = 0;
+  private pivotCd = 6;
+  private pivotWind = 0;
+  /** THE CEO: 1 Quarterly Review, 2 Restructuring, 3 Liquidation. */
+  ceoPhase = 1;
+  /** Phase change in progress (a speech; he can't be hurt): seconds left. */
+  private shiftT = 0;
+  private coinCd = 2.2;
+  private leapCd = 5;
+  /** Seconds into a leap (0 = on the ground). */
+  private leapT = 0;
+  private landed = false;
+  private leapFrom = { x: 0, y: 0 };
+  private leapTo = { x: 0, y: 0 };
+  private reportCd = 2.5;
+  private aura?: Phaser.GameObjects.Image;
+  /** Cutscene: walk here and do nothing else. */
+  scriptTo: { x: number; y: number } | null = null;
   /** Seconds this coworker has had no way to reach the player (see GameScene.rescueStraggler). */
   private unreachT = 0;
   private reachCheck = rand(0, 0.5);
@@ -127,8 +155,9 @@ export class Enemy {
     this.y = y;
     this.r = this.def.radius * (1 + (CHAR_SCALE - 1) * 0.5);
     const day = g.dayCfg;
-    this.maxHp = this.hp = this.def.hp * (mode === "ally" ? 1.5 : day.hpMult);
-    this.speed = this.def.speed * (mode === "ally" ? 1.1 : day.speedMult) * rand(0.92, 1.08);
+    // Bosses get tougher every nine days in endless (bossHp / bossSpeed are 1 during the run).
+    this.maxHp = this.hp = this.def.hp * (mode === "ally" ? 1.5 : day.hpMult) * (this.def.boss ? day.bossHp : 1);
+    this.speed = this.def.speed * (mode === "ally" ? 1.1 : day.speedMult) * (this.def.boss ? day.bossSpeed : 1) * rand(0.92, 1.08);
     this.facing = rand(-Math.PI, Math.PI);
 
     const spr = pick(this.def.sprites);
@@ -140,6 +169,7 @@ export class Enemy {
     if (mode === "ally") this.sprite.setTint(0x9fd3a8);
     if (this.def.shield && mode !== "npc") this.addShield();
     if (mode !== "npc") this.addHeld();
+    if (this.def.bossKind === "ceo") this.aura = g.add.image(x, y, "soft").setBlendMode(Phaser.BlendModes.ADD).setTint(0xffd36b).setScale(3.4).setAlpha(0.32);
   }
 
   private addHeld() {
@@ -155,6 +185,11 @@ export class Enemy {
   get ally() { return this.mode === "ally"; }
   /** A boss mid-charge: ploughs through people instead of being pushed around by them. */
   get rampaging() { return this.charging > 0; }
+  /** The CEO in mid-leap: up in the air, shots pass underneath and nobody bumps into him. */
+  get airborne() { return this.leapT > LEAP_UP && this.leapT < LEAP_LAND; }
+  get untargetable() { return this.airborne; }
+  /** The CEO between phases: nothing hurts him for a moment. */
+  get immune() { return this.shiftT > 0; }
   /** How hard this body is to push around (bosses and riot shields stand their ground). */
   get mass() { return this.def.boss ? 20 : this.def.shield ? 3 : 1 + this.r * this.r / 400; }
 
@@ -222,6 +257,8 @@ export class Enemy {
   takeDamage(amount: number, angle: number, knock: number) {
     if (this.dead) return false;
     if (this.def.shield && this.slip > 0) amount *= 1.5;
+    // Every phase of the CEO has to be fought: damage stops at the next phase's line until he's moved on to it.
+    if (this.def.bossKind === "ceo") amount = Math.min(amount, Math.max(0, this.hp - this.maxHp * CEO_FLOORS[this.ceoPhase - 1]));
     this.hp -= amount;
     this.hitFlash = 0.08;
     const kb = knock * (this.def.boss ? 0.15 : this.type === "hr" ? 0.35 : 1);
@@ -283,13 +320,14 @@ export class Enemy {
     else this.updateHostile(dt);
 
     if (this.dead) return;
-    this.environment(dt);
+    // (Up in the air the CEO touches neither puddles nor walls: the leap moves him.)
+    if (!this.airborne) this.environment(dt);
     // A live puddle can finish them off: their sprites are gone, so stop here.
     if (this.dead) return;
 
     // Integrate + collide.
     const p = { x: this.x, y: this.y };
-    g.world.moveCircle(p, this.r, this.vx * dt, this.vy * dt);
+    if (!this.airborne) g.world.moveCircle(p, this.r, this.vx * dt, this.vy * dt);
     const moved = Math.hypot(p.x - this.x, p.y - this.y);
     this.x = p.x;
     this.y = p.y;
@@ -342,6 +380,16 @@ export class Enemy {
   private updateHostile(dt: number) {
     const g = this.g;
     const pl = g.player;
+    // Nothing interrupts the CEO mid-leap or mid-speech.
+    if (this.airborne || this.shiftT > 0) this.stun = 0;
+    if (this.scriptTo) {
+      // Cutscene: stroll to the mark, eyes on the player.
+      const dx = this.scriptTo.x - this.x, dy = this.scriptTo.y - this.y, d = Math.hypot(dx, dy);
+      this.facing = Math.atan2(pl.y - this.y, pl.x - this.x);
+      if (d > 6) this.steer(dx / d, dy / d, this.speed * 0.6, dt, 6);
+      else { this.vx *= Math.pow(0.01, dt); this.vy *= Math.pow(0.01, dt); }
+      return;
+    }
     if (this.spawnGrace > 0 || this.stun > 0) {
       this.vx *= Math.pow(0.01, dt);
       this.vy *= Math.pow(0.01, dt);
@@ -417,7 +465,7 @@ export class Enemy {
         this.windup += dt;
         if (this.windup > (this.def.boss ? 0.45 : 0.22)) {
           this.windup = 0;
-          this.rangedCd = R.cooldown * rand(0.85, 1.15);
+          this.rangedCd = R.cooldown * rand(0.85, 1.15) * (this.def.boss ? g.dayCfg.bossRate : 1);
           this.shoot(tx, ty);
         }
       }
@@ -431,50 +479,15 @@ export class Enemy {
       this.callerAI(dt, d);
       if (this.stuckTimer > 0.35) g.smashWalls(this.x + mvx * (this.r + 12), this.y + mvy * (this.r + 12), this.r + 16);
     }
-    // THE CONSULTANT: telegraphed charges and intern reinforcements.
-    if (this.def.boss && (this.def.bossKind ?? "consultant") === "consultant") {
-      this.bossSummonCd -= dt;
-      if (this.bossSummonCd <= 0) {
-        this.bossSummonCd = rand(8, 11);
-        this.say("BRING IN THE INTERNS!", 1.6, "#e9c25a");
-        g.audio.play("alert", { vol: 0.4 });
-        for (let k = 0; k < 2 + Math.floor(g.dayCfg.day / 5); k++) {
-          const a = rand(0, Math.PI * 2);
-          const p = g.safeSpot(this.x + Math.cos(a) * 70, this.y + Math.sin(a) * 70);
-          const e = g.spawnEnemy("intern", p.x, p.y, "hostile");
-          e.spawnGrace = 0.5;
-          g.fx.burst("confetti", p.x, p.y, 8);
-        }
-      }
-      // Bosses don't use doors.
-      if (this.charging > 0) g.smashWalls(this.x + this.vx * 0.06, this.y + this.vy * 0.06, this.r + 22);
-      else if (this.stuckTimer > 0.35) g.smashWalls(this.x + mvx * (this.r + 12), this.y + mvy * (this.r + 12), this.r + 16);
-      if (this.charging > 0) {
-        this.charging -= dt;
-        this.facing = Math.atan2(this.vy, this.vx);
-        if (chance(0.5)) g.fx.burst("pixel", this.x, this.y, 2, 0xffd7a8);
-        if (d < this.r + pl.r + 8 && this.attackCd <= 0) {
-          this.attackCd = 1;
-          pl.damage(2, this.x, this.y, "charge", this);
-        }
-        this.attackCd -= dt;
-        return;
-      }
-      this.chargeCd -= dt;
-      if (this.chargeCd <= 0 && this.hasLos && d < 600) {
-        this.chargeWind += dt;
-        this.vx *= 0.8; this.vy *= 0.8;
-        if (this.chargeWind > 0.7) {
-          this.chargeWind = 0;
-          this.chargeCd = rand(5, 7);
-          this.charging = 0.75;
-          this.vx = (dx / d) * 820;
-          this.vy = (dy / d) * 820;
-          g.audio.play("dodge", { vol: 0.6, rate: 0.6 });
-          g.fx.shake(0.2);
-        }
-        return;
-      }
+    // THE CONSULTANT: interns that shield him, memo sprays, and a ring of memos once he's hurt.
+    if (this.def.boss && this.def.bossKind === "consultant") {
+      if (this.consultantAI(dt)) return;
+      if (this.stuckTimer > 0.35) g.smashWalls(this.x + mvx * (this.r + 12), this.y + mvy * (this.r + 12), this.r + 16);
+    }
+    // THE CEO: three phases of the big finish.
+    if (this.def.boss && this.def.bossKind === "ceo") {
+      if (this.ceoAI(dt, d)) return;
+      if (this.stuckTimer > 0.35) g.smashWalls(this.x + mvx * (this.r + 12), this.y + mvy * (this.r + 12), this.r + 16);
     }
 
     // Robots sidestep when the player aims at them.
@@ -510,7 +523,8 @@ export class Enemy {
 
     // Melee.
     this.attackCd -= dt;
-    const reach = this.r + (target === pl ? pl.r : 14) + 6;
+    // Bodies stop at touching distance now, so reach is measured from the edge of whoever it is.
+    const reach = this.r + (target instanceof Enemy ? target.r : pl.r) + 6;
     if (d < reach && this.attackCd <= 0) {
       this.attackCd = this.def.boss ? 1.0 : 0.85;
       if (target === pl) {
@@ -657,7 +671,7 @@ export class Enemy {
       this.vx *= Math.pow(0.02, dt);
       this.vy *= Math.pow(0.02, dt);
       if (chance(dt * 8)) g.fx.burst("spark", this.x + rand(-24, 24), this.y - this.r - 14, 1, 0xe9c25a);
-      if (this.dizzy <= 0) this.chargeCd = rand(1.4, 2.4);
+      if (this.dizzy <= 0) this.chargeCd = rand(1.4, 2.4) * g.dayCfg.bossRate;
       return true;
     }
     if (this.charging > 0) {
@@ -693,7 +707,7 @@ export class Enemy {
           g.audio.play("wall", { vol: 0.8 });
           g.fx.text(this.x, this.y - this.r - 34, "BONK!", { color: "#e9c25a", size: 30, pop: true, dur: 1.1 });
           g.tipOnce("hatchet", "He's dizzy! Hit him now. Dodge his charges so he slams into concrete walls.", "#e9c25a");
-        } else this.chargeCd = rand(1.2, 2.2);
+        } else this.chargeCd = rand(1.2, 2.2) * g.dayCfg.bossRate;
       }
       return true;
     }
@@ -733,7 +747,7 @@ export class Enemy {
     const g = this.g, pl = g.player;
     this.confCd -= dt;
     if (this.hp < this.maxHp * 0.6 && this.confCd <= 0 && this.hasLos && d < 820) {
-      this.confCd = rand(9, 12);
+      this.confCd = rand(9, 12) * g.dayCfg.bossRate;
       this.throwHide = 0.8;
       this.say("CONFERENCE CALL!", 1.6, "#e9c25a");
       g.audio.play("phone", { vol: 0.6 });
@@ -742,6 +756,149 @@ export class Enemy {
         g.projectiles.lobPhone(this.x, this.y, pl.x + Math.cos(a) * rr, pl.y + Math.sin(a) * rr, this);
       }
     }
+  }
+
+  /**
+   * THE CONSULTANT: brings in interns who shield him ("synergy": a quarter of the damage while any of his own interns
+   * are close, drawn as gold tethers), and once he's below half health he spins up and pivots: a full ring of memos.
+   * Returns true while he's busy winding up.
+   */
+  private consultantAI(dt: number): boolean {
+    const g = this.g, rate = g.dayCfg.bossRate;
+    let links = 0, mine = 0;
+    for (const o of g.enemies) {
+      if (o.dead || o.summoner !== this) continue;
+      mine++;
+      if (!o.hostile || (o.x - this.x) ** 2 + (o.y - this.y) ** 2 > 560 * 560) continue;
+      links++;
+      g.drawTether(this.x, this.y, o.x, o.y);
+    }
+    this.synergy = links;
+    this.bossSummonCd -= dt;
+    if (this.bossSummonCd <= 0) {
+      this.bossSummonCd = rand(8, 10) * rate;
+      const n = Math.min(4 - mine, 2 + Math.floor(g.dayCfg.day / 6));
+      if (n > 0) {
+        this.say(pick(["BRING IN THE INTERNS!", "LET'S LEVERAGE SOME SYNERGY!", "I'LL NEED A TEAM ON THIS!"]), 1.6, "#e9c25a");
+        g.audio.play("alert", { vol: 0.4 });
+        for (let k = 0; k < n; k++) {
+          const a = rand(0, Math.PI * 2);
+          const p = g.safeSpot(this.x + Math.cos(a) * 80, this.y + Math.sin(a) * 80);
+          const e = g.spawnEnemy("intern", p.x, p.y, "hostile");
+          e.spawnGrace = 0.5;
+          e.summoner = this;
+          g.fx.burst("confetti", p.x, p.y, 8);
+        }
+        g.tipOnce("synergy", "The Consultant's interns shield him (SYNERGY): he takes a quarter damage. Fire the interns first!", "#e9c25a");
+      }
+    }
+    if (this.hp >= this.maxHp * 0.5) return false;
+    this.pivotCd -= dt;
+    if (this.pivotCd > 0 && this.pivotWind <= 0) return false;
+    if (this.pivotWind <= 0) {
+      this.say("PIVOT!", 1.0, "#e9c25a");
+      g.audio.play("dodge", { vol: 0.5, rate: 0.7 });
+    }
+    this.pivotWind += dt;
+    this.vx *= Math.pow(0.02, dt);
+    this.vy *= Math.pow(0.02, dt);
+    this.facing += dt * 16;
+    if (this.pivotWind > 0.6) {
+      this.pivotWind = 0;
+      this.pivotCd = rand(5.5, 7) * rate;
+      const n = 16, off = rand(0, Math.PI * 2);
+      for (let k = 0; k < n; k++) g.projectiles.fireEnemy("memo", this.x, this.y, off + (k / n) * Math.PI * 2, 280, 1, this);
+      g.fx.shake(0.2);
+      g.audio.play("paper", { vol: 0.6, rate: 0.8 });
+    }
+    return true;
+  }
+
+  /**
+   * THE CEO. Phase 1, Quarterly Review: fans of gold coins and golden-parachute leaps (a red ring marks where he lands).
+   * Phase 2, Restructuring: security on call, two fans at once, and landings that scatter coins. Phase 3, Liquidation:
+   * burning budget reports lobbed at you and the office on fire. Between phases he makes a speech (and can't be hurt).
+   * Returns true while he's busy (speech or leap).
+   */
+  private ceoAI(dt: number, d: number): boolean {
+    const g = this.g, pl = g.player, rate = g.dayCfg.bossRate;
+    const want = this.hp <= this.maxHp * CEO_FLOORS[1] + 0.5 ? 3 : this.hp <= this.maxHp * CEO_FLOORS[0] + 0.5 ? 2 : 1;
+    if (want > this.ceoPhase && this.leapT <= 0 && this.shiftT <= 0) {
+      this.ceoPhase = want;
+      this.shiftT = 1.8;
+      this.coinCd = Math.max(this.coinCd, 1.2);
+      this.leapCd = Math.max(this.leapCd, 2.5);
+      g.ceoPhaseShift(this, want);
+    }
+    if (this.shiftT > 0) {
+      this.shiftT -= dt;
+      this.vx *= Math.pow(0.01, dt);
+      this.vy *= Math.pow(0.01, dt);
+      return true;
+    }
+    const phase = this.ceoPhase;
+    if (this.leapT > 0) {
+      this.leapT += dt;
+      const t = this.leapT;
+      this.vx = this.vy = 0;
+      if (t >= LEAP_UP && t < LEAP_LAND) {
+        const k = (t - LEAP_UP) / (LEAP_LAND - LEAP_UP);
+        this.x = lerp(this.leapFrom.x, this.leapTo.x, k);
+        this.y = lerp(this.leapFrom.y, this.leapTo.y, k);
+      } else if (t >= LEAP_LAND && !this.landed) {
+        this.landed = true;
+        this.x = this.leapTo.x;
+        this.y = this.leapTo.y;
+        g.ceoLanding(this, this.x, this.y);
+      }
+      if (!this.landed) g.drawLandingZone(this.leapTo.x, this.leapTo.y, CEO_LEAP_R, clamp(t / LEAP_LAND, 0, 1));
+      if (t >= LEAP_END) {
+        this.leapT = 0;
+        this.leapCd = (phase === 1 ? 6.5 : phase === 2 ? 5 : 4.2) * rand(0.9, 1.1) * rate;
+      }
+      return true;
+    }
+    this.leapCd -= dt;
+    if (this.leapCd <= 0 && this.hasLos && d < 760) {
+      this.leapT = 0.0001;
+      this.landed = false;
+      this.leapFrom = { x: this.x, y: this.y };
+      this.leapTo = g.safeSpot(pl.x + pl.vx * 0.35, pl.y + pl.vy * 0.35);
+      this.say(pick(["GOLDEN PARACHUTE!", "TOP-DOWN MANAGEMENT!", "LET'S TOUCH BASE!"]), 1.0, "#e9c25a");
+      g.audio.play("dodge", { vol: 0.6, rate: 0.55 });
+      g.tipOnce("ceoleap", "The CEO lands where the red ring is. Get out of it (or dodge-roll as he lands)!", "#e9c25a");
+      return true;
+    }
+    // Bonus cheques for everyone: fans of gold coins.
+    this.coinCd -= dt;
+    if (this.coinCd <= 0 && this.hasLos && d < 820) {
+      this.coinCd = (phase === 1 ? 2.3 : phase === 2 ? 2.0 : 1.6) * rand(0.85, 1.15) * rate;
+      this.throwHide = 0.3;
+      const t = d / 420;
+      const base = Math.atan2(pl.y + pl.vy * t * 0.5 - this.y, pl.x + pl.vx * t * 0.5 - this.x);
+      const fans = phase === 2 ? [-0.42, 0.42] : [0];
+      const n = phase === 1 ? 7 : phase === 2 ? 5 : 9;
+      for (const c of fans) {
+        for (let k = 0; k < n; k++) g.projectiles.fireEnemy("coin", this.x + Math.cos(base) * 26, this.y + Math.sin(base) * 26, base + c + (k - (n - 1) / 2) * 0.11, 420, 1, this);
+      }
+      g.audio.play("coins", { vol: 0.45, minGap: 120 });
+      if (chance(0.25) && g.canBark()) this.say(pick(["BONUSES FOR EVERYONE!", "IT'S A PERFORMANCE BONUS!", "SPEND IT WISELY!"]), 1.2, "#e9c25a");
+    }
+    // Liquidation: burning budget reports, lobbed like grenades.
+    if (phase === 3) {
+      this.reportCd -= dt;
+      if (this.reportCd <= 0 && d < 860) {
+        this.reportCd = rand(2.4, 3.2) * rate;
+        for (let k = 0; k < 2; k++) {
+          const a = rand(0, Math.PI * 2), rr = k === 0 ? 0 : rand(90, 160);
+          const t = g.safeSpot(pl.x + pl.vx * 0.4 + Math.cos(a) * rr, pl.y + pl.vy * 0.4 + Math.sin(a) * rr);
+          g.projectiles.lobReport(this.x, this.y, t.x, t.y, this);
+        }
+        g.audio.play("fire", { vol: 0.4, minGap: 200 });
+        if (chance(0.4) && g.canBark()) this.say(pick(["INSURANCE WILL COVER IT!", "BURN THE BOOKS!", "IT'S ALL A WRITE-OFF!"]), 1.3, "#ff8a3a");
+      }
+    }
+    return false;
   }
 
   // ---------------------------------------------------------------- allies
@@ -953,6 +1110,7 @@ export class Enemy {
         .setRotation(rot + Math.PI / 2).setDepth(this.y + 5)
         .setVisible(this.mode !== "npc" && this.throwHide <= 0 && this.dizzy <= 0).setAlpha(this.vis);
     }
+    if (this.def.bossKind === "ceo") this.renderCeo(rot);
 
     if (this.shield) {
       const sx = this.x + Math.cos(this.facing) * (this.r + 8);
@@ -981,7 +1139,34 @@ export class Enemy {
     void dt;
   }
 
+  /** The CEO's look: a gold aura, the leap (crouch, up over everything, heavy landing), and his mood by phase. */
+  private renderCeo(rot: number) {
+    const g = this.g, t = this.leapT;
+    let s = 1, lift = 0;
+    if (t > 0 && t < LEAP_UP) s = 1 - 0.1 * (t / LEAP_UP);
+    else if (this.airborne) {
+      const k = (t - LEAP_UP) / (LEAP_LAND - LEAP_UP);
+      s = 1 + 0.45 * Math.sin(k * Math.PI);
+      lift = Math.sin(k * Math.PI) * 70;
+    } else if (t >= LEAP_LAND) s = 0.9 + 0.1 * clamp((t - LEAP_LAND) / (LEAP_END - LEAP_LAND), 0, 1);
+    this.sprite.setScale(this.def.scale * CHAR_SCALE * s).setY(this.y - lift);
+    this.shadow.setScale(this.def.scale * 0.95 * CHAR_SCALE * (this.airborne ? 0.65 : 1));
+    if (this.airborne) this.sprite.setDepth(DEPTH.PROJECTILE - 10);
+    if (this.heldImg) {
+      const reach = 17 * this.def.scale * CHAR_SCALE * s;
+      this.heldImg.setPosition(this.x + Math.cos(rot) * reach, this.y - lift + Math.sin(rot) * reach).setScale((this.def.heldScale ?? 1) * this.def.scale * s);
+      if (this.airborne) this.heldImg.setDepth(DEPTH.PROJECTILE - 9);
+    }
+    // Warm gold, then flushed, then furious red once it's all going up in flames. White-gold while he makes a speech.
+    if (this.hitFlash <= 0 && this.burn <= 0 && this.stun <= 0) this.sprite.setTint(this.ceoPhase === 3 ? 0xffa98a : this.ceoPhase === 2 ? 0xffd2a0 : this.def.tint ?? 0xffffff);
+    if (this.shiftT > 0) this.sprite.setTintFill(Math.floor(g.time.now / 90) % 2 ? 0xffffff : 0xe9c25a);
+    this.aura?.setPosition(this.x, this.y + 4).setDepth(this.y - 31).setTint(this.ceoPhase === 3 ? 0xff7a3a : 0xffd36b)
+      .setAlpha((0.26 + 0.1 * Math.sin(g.time.now / 260)) * this.vis * (this.airborne ? 0.5 : 1));
+    if (this.ceoPhase === 3 && chance(0.3)) g.fx.burst("ember", this.x + rand(-20, 20), this.y + rand(-10, 20), 1);
+  }
+
   destroy() {
+    this.aura?.destroy();
     this.sprite.destroy();
     this.shadow.destroy();
     this.shield?.destroy();

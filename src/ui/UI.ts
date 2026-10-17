@@ -929,6 +929,91 @@ export class UI {
     });
   }
 
+  /**
+   * A cutscene: letterbox bars and a dialogue box, the lines typed out one at a time. Click, Space or Enter goes on,
+   * Esc or SKIP skips. `onDone` runs once, when it's over; the returned function just takes it down (no callback).
+   */
+  showCutscene(speaker: string, lines: string[], onDone: () => void): () => void {
+    const el = this.screen("cutscene", "", `
+      <div class="cs-bar top"></div><div class="cs-bar bottom"></div>
+      <div class="cs-box"><div class="cs-name">${esc(speaker)}</div><p class="cs-line"></p><div class="cs-hint">CLICK TO CONTINUE</div></div>
+      <button class="btn ghost small cs-skip" id="csskip">SKIP</button>`);
+    const line = $(".cs-line", el), hint = $(".cs-hint", el);
+    let i = -1, over = false, typing: gsap.core.Tween | null = null;
+    const cleanup = () => {
+      over = true;
+      window.removeEventListener("keydown", onKey, true);
+      typing?.kill();
+    };
+    const finish = () => {
+      if (over) return;
+      cleanup();
+      onDone();
+    };
+    const next = () => {
+      if (over) return;
+      if (typing && typing.isActive()) { typing.progress(1); return; }
+      i++;
+      if (i >= lines.length) { finish(); return; }
+      const text = lines[i];
+      const o = { n: 0 };
+      line.textContent = "";
+      typing = gsap.to(o, {
+        n: text.length, duration: Math.min(1.8, text.length * 0.035), ease: "none",
+        onUpdate: () => {
+          const n = Math.round(o.n);
+          if (n > (line.textContent?.length ?? 0) && text[n - 1] !== " ") this.sfx?.("type");
+          line.textContent = text.slice(0, n);
+        },
+        onComplete: () => {
+          line.textContent = text;
+          hint.textContent = i === lines.length - 1 ? "CLICK TO FIGHT" : "CLICK TO CONTINUE";
+        }
+      });
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (!document.getElementById("cutscene")) { window.removeEventListener("keydown", onKey, true); return; }
+      // Nothing gets through to the (frozen) game while he's talking.
+      e.stopPropagation();
+      if (e.code === "Space" || e.code === "Enter") { e.preventDefault(); if (!e.repeat && !this.guarded(el)) next(); }
+      else if (e.code === "Escape") { e.preventDefault(); if (!this.guarded(el)) finish(); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    el.addEventListener("click", (e) => {
+      if (this.guarded(el)) return;
+      if ((e.target as HTMLElement).closest("#csskip")) { finish(); return; }
+      next();
+    });
+    gsap.from($(".cs-bar.top", el), { yPercent: -100, duration: 0.5, ease: "power3.out" });
+    gsap.from($(".cs-bar.bottom", el), { yPercent: 100, duration: 0.5, ease: "power3.out" });
+    gsap.from($(".cs-box", el), { y: 60, opacity: 0, duration: 0.45, delay: 0.3, ease: "back.out(1.6)" });
+    gsap.delayedCall(0.7, next);
+    return () => {
+      cleanup();
+      gsap.killTweensOf(next);
+      this.closeScreen("cutscene");
+    };
+  }
+
+  /** The end of a nine-day run: a letter of promotion, then cash out (back to the title) or keep working (endless). */
+  showRunEnd(d: { lines: [string, string][]; newBest: boolean }, h: { endless: () => void; cashOut: () => void }) {
+    const el = this.screen("runend", "", `
+      <div class="re clickable">
+        <div class="re-letter"><h5>LETTER OF PROMOTION</h5><p class="re-sub">You outlasted the budget cuts, three bosses and the CEO himself.</p>${d.lines.map(([k, v]) => `<div class="row"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("")}<div class="stamp">PROMOTED</div></div>
+        ${d.newBest ? `<div class="go-best">NEW PERSONAL BEST!</div>` : ""}
+        <div class="re-q">The board would like you to stay on. Keep working?</div>
+        <div class="go-btns">
+          <button class="btn big red" id="reEndless">KEEP WORKING (ENDLESS)</button>
+          <button class="btn big ghost" id="reCash">CASH OUT</button>
+        </div>
+      </div>`);
+    this.slideUp(el.querySelectorAll(".re-letter, .go-best, .re-q, .go-btns"));
+    gsap.fromTo($(".re-letter .stamp", el), { scale: 3.5, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.28, delay: 0.6, ease: "power4.in", onComplete: () => this.sfx?.("stamp") });
+    let chosen = false;
+    $("#reEndless", el).addEventListener("click", () => { if (!this.guarded(el) && !chosen) { chosen = true; h.endless(); } });
+    $("#reCash", el).addEventListener("click", () => { if (!this.guarded(el) && !chosen) { chosen = true; h.cashOut(); } });
+  }
+
   showGameOver(d: { lines: [string, string][]; best: string; newBest: boolean }, onRestart: () => void, onTitle: () => void) {
     const el = this.screen("gameover", "", `
       <div class="go clickable">

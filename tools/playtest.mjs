@@ -330,6 +330,89 @@ try {
     await shot("l01-locked");
   }
 
+  // The finale: day 9's CEO (cutscene, three phases, a leap), the end of the run, endless, and a cutscene-free day-18 CEO.
+  if (scenario === "ceo") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    const plan = await ev(() => { const h = window.__HT; return [3, 6, 9, 12, 15, 18, 21, 27].map((d) => `${d}:${h.dayConfig(d).bossType}`).join(" "); });
+    console.log("boss plan", plan);
+    await ev(() => { const h = window.__HT; h.god(true); h.day(9); });
+    await sleep(700);
+    await ev(() => window.__HT.toFight());
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(900);
+    console.log("day 9", JSON.stringify(await ev(() => { const s = window.__HT.scene; return { quota: s.quota, final: s.dayCfg.final, boss: s.dayCfg.bossType }; })));
+    await ev(() => window.__HT.boss());
+    for (let k = 0; k < 200 && (await ev(() => window.__HT.scene.phase)) !== "cutscene"; k++) await sleep(250);
+    console.log("phase after the CEO arrives:", await ev(() => window.__HT.scene.phase));
+    await sleep(1600);
+    await shot("ceo01-cutscene");
+    for (let k = 0; k < 4; k++) { await page.keyboard.press("Space"); await sleep(250); await page.keyboard.press("Space"); await sleep(500); }
+    await sleep(600);
+    console.log("after the cutscene:", await ev(() => window.__HT.scene.phase));
+    const boss = () => ev(() => { const s = window.__HT.scene, b = s.waves.boss; return b ? { phase: b.ceoPhase, hp: Math.round(b.hp), max: Math.round(b.maxHp), dead: b.dead, imm: b.immune, air: b.airborne } : null; });
+    await ev(() => { const s = window.__HT.scene, b = s.waves.boss; const p = s.world.nearestWalkable(b.x, b.y + 260); s.player.x = p.x; s.player.y = p.y; });
+    await sleep(1500);
+    await shot("ceo02-phase1");
+    // A big hit can't skip a phase: the damage stops at the 66% line.
+    await ev(() => { const s = window.__HT.scene, b = s.waves.boss; s.hitEnemy(b, b.maxHp, { angle: 0, kind: "staple", x: b.x, y: b.y, knock: 0 }); });
+    console.log("after a huge hit in phase 1:", JSON.stringify(await boss()));
+    await sleep(2600);
+    console.log("phase 2:", JSON.stringify(await boss()), "hr on the floor:", await ev(() => window.__HT.scene.enemies.filter((e) => e.type === "hr").length));
+    await shot("ceo03-phase2");
+    // Wait out the phase-change speech, then make him leap.
+    for (let k = 0; k < 80 && (await boss()).imm; k++) await sleep(200);
+    await ev(() => { const s = window.__HT.scene, b = s.waves.boss; const p = s.world.nearestWalkable(b.x, b.y + 200); s.player.x = p.x; s.player.y = p.y; b.leapCd = 0; });
+    let air = false;
+    for (let k = 0; k < 60 && !air; k++) { air = (await boss()).air; if (!air) await sleep(100); }
+    console.log("leaping:", JSON.stringify(await boss()));
+    await shot("ceo04-leap");
+    await sleep(1500);
+    await ev(() => { const s = window.__HT.scene, b = s.waves.boss; s.hitEnemy(b, b.maxHp, { angle: 0, kind: "staple", x: b.x, y: b.y, knock: 0 }); });
+    await sleep(2800);
+    console.log("phase 3:", JSON.stringify(await boss()), "burning tiles:", await ev(() => window.__HT.scene.hazards.burningCount));
+    await shot("ceo05-phase3");
+    await sleep(2500);
+    await shot("ceo06-phase3-later");
+    await ev(() => { const s = window.__HT.scene, b = s.waves.boss; for (let k = 0; k < 40 && !b.dead; k++) s.hitEnemy(b, b.maxHp * 0.1, { angle: 0, kind: "staple", x: b.x, y: b.y, knock: 0 }); });
+    await sleep(800);
+    await shot("ceo07-defeated");
+    for (let k = 0; k < 40; k++) {
+      if ((await ev(() => window.__HT.scene.phase)) !== "downsizing") break;
+      await ev(() => window.__HT.killAll());
+      await sleep(400);
+    }
+    // (Headless frames are slow: wait for things rather than for a fixed time.)
+    await page.waitForFunction(() => document.querySelector("#results:not(.guard) .card"), { timeout: 60000 });
+    await ev(() => document.querySelector("#results .card").click());
+    await page.waitForFunction(() => document.querySelector("#runend:not(.guard) #reEndless"), { timeout: 60000 });
+    console.log("after day 9's pick:", await ev(() => window.__HT.scene.phase));
+    await sleep(900);
+    await shot("ceo08-run-end");
+    await ev(() => document.querySelector("#reEndless").click());
+    await page.waitForFunction(() => document.querySelector("#memo:not(.guard) #mgo"), { timeout: 60000 });
+    await sleep(1200);
+    await shot("ceo09-memo-day10");
+    await ev(() => document.querySelector("#mgo").click());
+    await sleep(1500);
+    console.log("endless:", JSON.stringify(await ev(() => ({ endless: window.__HT.state.endless, day: window.__HT.state.day, phase: window.__HT.scene.phase }))));
+    // Endless CEO on day 18: no cutscene.
+    await ev(() => { const h = window.__HT; h.day(18); });
+    await sleep(700);
+    await ev(() => window.__HT.toFight());
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(900);
+    await ev(() => window.__HT.boss());
+    let sawCut = false;
+    for (let k = 0; k < 160 && !(await ev(() => !!window.__HT.scene.waves.boss)); k++) { if ((await ev(() => window.__HT.scene.phase)) === "cutscene") sawCut = true; await sleep(250); }
+    for (let k = 0; k < 12; k++) { if ((await ev(() => window.__HT.scene.phase)) === "cutscene") sawCut = true; await sleep(250); }
+    console.log("day 18:", JSON.stringify({ sawCutscene: sawCut, boss: await boss(), phase: await ev(() => window.__HT.scene.phase), bossHp: await ev(() => Math.round(window.__HT.scene.waves.boss?.maxHp ?? 0)) }));
+    await shot("ceo10-day18");
+  }
+
   // Open-Plan Office: the dodge is a short dash through walls. Never out of the building, never into the locked room or furniture.
   if (scenario === "phase") {
     await sleep(700);

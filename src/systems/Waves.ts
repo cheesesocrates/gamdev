@@ -68,9 +68,9 @@ export class Waves {
     }
     if (g.phase !== "downsizing") return;
 
-    // Boss day: today's boss arrives once 40% of the quota is fired.
+    // Boss day: today's boss arrives once 40% of the quota is fired (the CEO doesn't wait that long: 25%).
     const cfg = g.dayCfg;
-    if (cfg.boss && !this.bossSpawned && g.fired >= Math.floor(g.quota * 0.4)) {
+    if (cfg.boss && !this.bossSpawned && g.fired >= Math.floor(g.quota * (cfg.bossType === "ceo" ? 0.25 : 0.4))) {
       this.bossSpawned = true;
       const el = pick(this.elevators.length ? this.elevators.map((e) => e.spawn) : g.map.spawns);
       this.queue.push({ type: cfg.bossType, spawn: el, t: 1.8 });
@@ -134,7 +134,10 @@ export class Waves {
       e.vy = 140;
       if (chance(0.15) && g.canBark()) e.say(pick(ELEVATOR_LINES), 1.4);
     }
-    if (ENEMIES[type].boss) this.boss = e;
     g.fx.burst("pixel", p.x, p.y, 6, 0xb8bfc9);
+    if (ENEMIES[type].boss) {
+      this.boss = e;
+      g.bossArrived(e);
+    }
   }
 }

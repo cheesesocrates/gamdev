@@ -61,6 +61,31 @@ When a batch ships, the Unreleased lines move under a new version heading with t
   ends inside a wall or a desk: it carries on to come out the far side or stops at the last open spot. You see from
   the open floor while you're inside a wall, and a dash that's still going when the day's crunch ends is landed
   first. Tested with 4,000 random dashes all over the office.
+- Gameplay: **a run is nine days.** Day 3 and day 6 each get a boss drawn at random from the Hatchet Man, the Cold
+  Caller and the Consultant (never the same one twice), and day 9 is the finale against **the CEO**. The day banner
+  says "DAY 3 / 9". Tomorrow's memo always names the right boss.
+- Gameplay: **the CEO** (day 9) is the grand finish. He comes down in the lift and, the first time only, gets an
+  entrance: the floor freezes, letterbox bars slide in, the camera cuts to him and he trash-talks you ("So. You're the
+  one costing me five salaries.") before the fight (click / Space to go on, Esc or SKIP to skip). Three phases, each
+  of which has to be fought (damage stops at the next phase's line until he moves on, with a speech and a shockwave
+  in between): **Quarterly Review** (fans of gold coins; golden-parachute leaps that land where a red ring marks the
+  floor), **Restructuring** (two HR Directors called up as security, double coin fans, landings that scatter coins)
+  and **Liquidation** (burning budget reports lobbed at you, the office set on fire, faster everything). He arrives
+  at 25% of the quota instead of 40%, and the day's quota is smaller so he's the main event. His defeat gets a
+  golden-confetti send-off.
+- Gameplay: the Consultant has his own tricks now instead of a copy of the Hatchet Man's charge: his interns shield
+  him (**synergy**: gold tethers, and he takes a quarter damage while any of them are close, so fire them first), and
+  below half health he spins up and **pivots**: a full ring of memos.
+- Gameplay: **after day 9**: a Letter of Promotion, then a choice: **CASH OUT** (back to the title, the run counts as
+  complete) or **KEEP WORKING (ENDLESS)**. In endless a boss still turns up every third day (from the same three) and
+  the CEO every ninth day (18, 27, ...), with no cutscene, and every nine days bosses get 30% more health, a little
+  faster and attack more often. The quota keeps climbing, more gently than during the run. The title screen's best
+  shows "RUN COMPLETE" (plus endless days) once you've finished a run.
+- Fix (Gameplay): a boss day could end without the boss if the quota was met before he'd stepped out of the lift.
+  The day now waits for the boss to turn up and be fired.
+- Fix (UI): every boss was announced as "THE CONSULTANT HAS BEEN LET GO" when fired; it now uses the boss's name.
+- Fix (Gameplay): coworkers' melee reach against another coworker (a Blame Game scapegoat, an ally) now measures
+  from that coworker's edge, so a big one standing right there can be hit.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.
