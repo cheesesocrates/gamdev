@@ -21,6 +21,9 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Fix (UI): the FIRED x / y bar sometimes stayed one short (e.g. 9 / 10 under "QUOTA MET"): the last firing ended the
   day before the HUD caught up. It now updates on every firing and at the end of the day. When the quota is met but
   the boss is still standing, it says "QUOTA MET: FIRE THE BOSS" instead of looking finished.
+- Fix (Gameplay): the Cold Caller's PA line said "Do not pick up the phones", which sounded like something to avoid
+  doing. It now says what actually happens: ringing phones blow up, so keep clear of the red rings. A one-time tip
+  explains it when the first phone lands (and that a keyboard swing sends one back).
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.

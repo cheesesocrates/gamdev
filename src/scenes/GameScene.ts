@@ -1555,6 +1555,7 @@ export class GameScene extends Phaser.Scene {
   /** A thrown desk phone lands: it rings on the floor, then goes off. Swatted-back phones go off at once. */
   phoneLanded(x: number, y: number, friendly: boolean, owner: Enemy | null) {
     if (friendly) { this.phoneBlast(x, y, true, null); return; }
+    this.tipOnce("phones", "Ringing phones blow up a second after they land. Get out of the red ring! (A keyboard swing sends one back.)", "#e9c25a");
     const img = this.add.image(x, y, "i_phone").setDepth(y + 3).setScale(1.15);
     this.phoneBombs.push({ x, y, fuse: 1.05, ring: 0, img, owner });
     this.fx.burst("smoke", x, y + 6, 2, 0xd8c3a5);

@@ -47,8 +47,8 @@ export const BOSS_INFO: Record<BossKind, { sub: string; pa: string; memo: string
   },
   caller: {
     sub: "has a few calls to make",
-    pa: "Attention all staff. The Cold Caller is on the line. Do not pick up the phones.",
-    memo: "Due to budget cuts, the Cold Caller will be making some calls tomorrow. Do not pick up."
+    pa: "Attention all staff. The Cold Caller is on the line. Ringing phones blow up: keep clear of the red rings.",
+    memo: "Due to budget cuts, the Cold Caller will be dialing in tomorrow. Ringing phones explode."
   },
   consultant: {
     sub: "has been brought in to 'optimize headcount'",
