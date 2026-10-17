@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { CHAR_SCALE, DEPTH, TILE } from "../config";
-import { ENEMIES, EnemyDef, EnemyType } from "../data/enemies";
+import { ENEMIES, EnemyDef, EnemyType, standPose } from "../data/enemies";
 
 const HATCHET_BARKS = ["YOU'RE DONE!", "CLEAR YOUR DESK!", "RESTRUCTURING!", "NOTHING PERSONAL!", "THIS IS A CUT!"];
 const CALLER_BARKS = ["CAN YOU HEAR ME NOW?", "LET'S CIRCLE BACK!", "PER MY LAST CALL...", "HOLD, PLEASE!", "IT'S FOR YOU!"];
@@ -124,7 +124,7 @@ export class Enemy {
     this.facing = rand(-Math.PI, Math.PI);
 
     const spr = pick(this.def.sprites);
-    const texKey = mode === "npc" ? `char_${spr.replace(/_(hold|gun|machine)$/, "_stand")}` : `char_${spr}`;
+    const texKey = mode === "npc" ? `char_${standPose(spr)}` : `char_${spr}`;
     this.shadow = g.add.image(x, y, "shadow").setScale(this.def.scale * 0.95 * CHAR_SCALE);
     this.sprite = g.add.image(x, y, g.textures.exists(texKey) ? texKey : `char_${spr}`).setOrigin(0.42, 0.5).setScale(this.def.scale * CHAR_SCALE);
     this.sprite.setData("tex", `char_${spr}`);

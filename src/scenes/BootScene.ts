@@ -1,16 +1,16 @@
 import Phaser from "phaser";
 import { TILE } from "../config";
 import { SFX_FILES, MUSIC_FILES } from "../systems/Audio";
+import { ENEMIES, standPose } from "../data/enemies";
 
-export const CHAR_SPRITES = [
+/**
+ * The player's poses, then every coworker's sprite and the standing pose they use before 5 PM.
+ * Built from the enemy table so a coworker can never be missing its art (the Middle Manager once was).
+ */
+export const CHAR_SPRITES = [...new Set([
   "hitman1_gun", "hitman1_machine", "hitman1_silencer", "hitman1_stand", "hitman1_reload", "hitman1_hold",
-  "manBrown_hold", "womanGreen_hold", "survivor1_hold", "manBlue_hold", "manRed_hold",
-  "manOld_hold", "womanOld_hold", "hitman2_gun", "hitman2_machine", "survivor2_gun",
-  "soldier1_hold", "soldier2_hold", "zombie1_hold", "zombie2_hold", "robot1_machine", "robot2_machine",
-  "manBrown_stand", "womanGreen_stand", "survivor1_stand", "manBlue_stand", "manRed_stand",
-  "manOld_stand", "womanOld_stand", "hitman2_stand", "survivor2_stand", "soldier1_stand", "soldier2_stand",
-  "zombie1_stand", "zombie2_stand", "robot1_stand", "robot2_stand"
-];
+  ...Object.values(ENEMIES).flatMap((d) => d.sprites.flatMap((s) => [s, standPose(s)]))
+])];
 
 const PARTICLES = [
   "circle_05", "fire_01", "fire_02", "flame_01", "flame_03", "flame_05", "light_01", "magic_03",

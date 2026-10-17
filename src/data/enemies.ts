@@ -35,6 +35,9 @@ export interface EnemyDef {
   heldScale?: number;
 }
 
+/** The pose a coworker uses while still at their desk (before 5 PM). */
+export const standPose = (sprite: string) => sprite.replace(/_(hold|gun|machine|silencer)$/, "_stand");
+
 /** How each boss is announced: the banner, the PA, and the night-before memo. */
 export const BOSS_INFO: Record<BossKind, { sub: string; pa: string; memo: string }> = {
   hatchet: {
