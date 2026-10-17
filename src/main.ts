@@ -1,3 +1,4 @@
+// Rather Die Than Get Fired: entry point (boots Phaser, then the game scenes).
 import Phaser from "phaser";
 import "./ui/theme.css";
 import { BootScene } from "./scenes/BootScene";
