@@ -224,7 +224,6 @@ export class GameScene extends Phaser.Scene {
 
     this.setupInput();
     const cam = this.cameras.main;
-    cam.setBounds(0, 0, WORLD_W, WORLD_H);
     cam.setBackgroundColor("#0b0c10");
     this.onResize();
     this.scale.on("resize", () => this.onResize());
@@ -335,6 +334,9 @@ export class GameScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const h = this.scale.height;
     cam.setZoom(clamp(h / VIEW_WORLD_HEIGHT, 0.55, 1.8));
+    // Dead space past the outer walls: in a corner the camera can still move far enough to keep you clear of the HUD.
+    const padX = Math.round((this.scale.width / cam.zoom) * 0.35), padY = Math.round((h / cam.zoom) * 0.35);
+    cam.setBounds(-padX, -padY, WORLD_W + padX * 2, WORLD_H + padY * 2);
   }
 
   // ================================================================ flow: title / days

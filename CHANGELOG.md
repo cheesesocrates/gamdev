@@ -24,6 +24,9 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Fix (Gameplay): the Cold Caller's PA line said "Do not pick up the phones", which sounded like something to avoid
   doing. It now says what actually happens: ringing phones blow up, so keep clear of the red rings. A one-time tip
   explains it when the first phone lands (and that a keyboard swing sends one back).
+- Fix (UI): more dead space past the office's outer walls. In a corner the camera used to stop at the edge of the map,
+  so you ended up hidden under the HUD (the to-do note, hearts or minimap); now it can keep scrolling and you stay in
+  the open part of the screen.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.
