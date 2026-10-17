@@ -46,7 +46,8 @@ export interface GunOffer { id: string; name: string; desc: string; color: strin
 export interface ReviewData {
   bank: number;
   notes: { text: string; kind: "good" | "bad" | "" }[];
-  offers: { perk: PerkDef; sold: boolean; stacks: number }[];
+  /** `maxed`: you already have every stack of it (it can't be bought). */
+  offers: { perk: PerkDef; sold: boolean; stacks: number; maxed?: boolean }[];
   guns: GunOffer[];
   healCost: number;
   canHeal: boolean;
@@ -147,7 +148,7 @@ export class UI {
   /** Cards and gun offers lift a little on hover. */
   private lift(el: HTMLElement) {
     el.addEventListener("pointerenter", () => {
-      if (el.classList.contains("sold") || el.classList.contains("locked")) return;
+      if (el.classList.contains("sold") || el.classList.contains("locked") || el.classList.contains("maxed")) return;
       gsap.to(el, { y: -10, duration: 0.25, ease: "back.out(2.5)" });
       this.sfx?.("hover");
     });
@@ -728,11 +729,12 @@ export class UI {
       this.countUp(bankEl, Math.floor(d.bank), (v) => `${v}s`, prev, 0.4);
       gsap.fromTo($(".rv-bank", el), { scale: 0.9 }, { scale: 1, duration: 0.4, ease: "back.out(3)" });
     }
-    const stamp = (c: HTMLElement, text: string) => {
+    const stamp = (c: HTMLElement, text: string, cls = "", loud = true) => {
       const st = document.createElement("div");
-      st.className = "stamp";
+      st.className = `stamp ${cls}`;
       st.textContent = text;
       c.appendChild(st);
+      if (!loud) return;
       gsap.fromTo(st, { scale: 2.6, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.25, ease: "power3.in" });
       this.sfx?.("stamp");
     };
@@ -741,12 +743,17 @@ export class UI {
       if (!c) return;
       const afford = d.bank >= o.perk.cost;
       const wasSold = c.classList.contains("sold");
+      // Bought (or already maxed out): stamped, greyed out, no price tag, nothing left to click.
+      const maxed = !o.sold && !!o.maxed;
       c.classList.toggle("sold", o.sold);
-      c.classList.toggle("buyable", !o.sold && afford);
-      c.classList.toggle("poor", !o.sold && !afford);
+      c.classList.toggle("maxed", maxed);
+      c.classList.toggle("buyable", !o.sold && !maxed && afford);
+      c.classList.toggle("poor", !o.sold && !maxed && !afford);
       const own = $(".c-own", c);
       if (own) own.textContent = o.stacks > 0 ? `${o.stacks}/${o.perk.max}` : "";
-      if (o.sold && !wasSold) stamp(c, "HIRED");
+      if (o.sold && !wasSold) { c.querySelector(".stamp")?.remove(); stamp(c, "APPROVED"); }
+      if (maxed && !c.querySelector(".stamp")) stamp(c, "MAXED", "grey", false);
+      if (!maxed && !o.sold) c.querySelector(".stamp.grey")?.remove();
     });
     d.guns.forEach((g, i) => {
       const c = el.querySelector<HTMLElement>(`.gun[data-g="${i}"]`);

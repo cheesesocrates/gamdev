@@ -15,6 +15,9 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - World: new art for the kicked-over water cooler (lying on its side with the water gushing out). It is hand-drawn,
   so `tools/render-assets.mjs render` now leaves it alone (`handDrawn` in the spec), and the sprite is re-anchored
   when it swaps in.
+- UI: a bought upgrade clipboard is stamped **APPROVED** (not "HIRED"), its price tag disappears and the whole card
+  greys out, so it no longer looks like something you can buy again. A bought gun slip loses its price tag too. An
+  offer you already have every stack of shows as MAXED.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.

@@ -679,7 +679,7 @@ export class GameScene extends Phaser.Scene {
     this.ui.showReview({
       bank: GameState.bank,
       notes: this.reviewNotes,
-      offers: this.reviewOffers.map((o) => ({ ...o, stacks: GameState.stack(o.perk.id) })),
+      offers: this.reviewOffers.map((o) => ({ ...o, stacks: GameState.stack(o.perk.id), maxed: !o.sold && !GameState.canTake(o.perk) })),
       guns: this.reviewGuns.map((g) => ({ ...WEAPON_DEFS[g.id], sold: g.sold, locked: gunBought && !g.sold })),
       healCost,
       canHeal: GameState.hp < GameState.stats.maxHp,

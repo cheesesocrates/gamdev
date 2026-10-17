@@ -256,7 +256,13 @@ kbd { display: inline-block; min-width: 1.4em; padding: 1px 5px 0; border: 2px s
 .card.poor { cursor: not-allowed; }
 .card.poor .c-cost { background: #e4dccb; color: var(--c-red); }
 .card.poor .c-logo, .card.poor h4 { opacity: .5; }
-.card.sold { cursor: default; }
+.card.sold, .card.maxed { cursor: default; }
+/* Bought (or maxed out): the price tag goes, the clipboard greys out, the stamp stays loud. */
+.card.sold .c-cost, .card.maxed .c-cost, .gun.sold .g-cost { visibility: hidden; }
+.card.sold .cb-paper > *, .card.maxed .cb-paper > *, .gun.sold > :not(.stamp):not(.g-clip) { opacity: .5; filter: grayscale(.7); }
+.card.sold::after, .card.maxed::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 16px; background: rgba(28, 29, 33, .3); pointer-events: none; }
+.gun.sold::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 3px; background: rgba(28, 29, 33, .18); pointer-events: none; }
+.card .stamp.grey { border-color: #8f97a3; color: #6c7482; }
 .card .stamp, .gun .stamp { position: absolute; left: 50%; top: 45%; z-index: 3; padding: 6px 14px 3px; border: 5px solid var(--c-green); border-radius: 6px; background: rgba(247, 244, 234, .92); color: var(--c-green); font: 400 46px/1 var(--f-display); transform: translate(-50%, -50%) rotate(-12deg); pointer-events: none; }
 .screen.guard .btn, .screen.guard .card, .screen.guard .gun, .screen.guard input { pointer-events: none; }
 
