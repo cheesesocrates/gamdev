@@ -44,13 +44,13 @@ const LORE = [
   "Do your chores. Survive 5 PM. Whatever happens, don't get fired."
 ];
 
-/** The night-before memo line for each coworker type that shows up for the first time tomorrow. */
+/** What the night-before memo says when a coworker type shows up for the first time tomorrow. */
 const NEW_TYPE_MEMO: Partial<Record<EnemyType, string>> = {
-  robot: "Due to budget cuts, AI robots will be added to divide the workload.",
-  hr: "Due to budget cuts, HR Directors will be walking the floor. With riot shields.",
-  burnout: "Due to budget cuts, vacations are cancelled. Expect burnt-out employees.",
-  manager: "Due to budget cuts, middle managers will now manage you personally.",
-  fulltime: "Due to budget cuts, full-time staff are now competing for your salary."
+  robot: "AI robots join the payroll",
+  hr: "HR Directors now carry riot shields",
+  burnout: "vacations are cancelled (expect burnouts)",
+  manager: "middle managers will micromanage you",
+  fulltime: "full-timers are after your salary"
 };
 
 type Keys = Record<"W" | "A" | "S" | "D" | "UP" | "DOWN" | "LEFT" | "RIGHT" | "SPACE" | "SHIFT" | "E" | "R" | "Q" | "F" | "ONE" | "TWO" | "THREE" | "ENTER" | "ESC" | "P" | "M", Phaser.Input.Keyboard.Key>;
@@ -924,37 +924,31 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /** Before the next day: management's memo about what's harder tomorrow, read out over the PA. */
+  /** Before the next day: management's one-line memo about what's harder tomorrow, read out over the PA. */
   private endOfDayMemo() {
     const today = this.dayCfg;
     const next = dayConfig(GameState.day + 1, today.chores);
-    const lines = this.memoLines(today, next);
+    const change = this.memoChange(today, next);
     this.phase = "memo";
     this.ui.setHudMode("none");
-    this.ui.showMemo({ day: next.day, lines }, () => {
+    this.ui.showMemo({ day: next.day, change, quota: next.quota }, () => {
       this.speakers.cancel();
       this.ui.closeScreen("memo");
       this.startDay(next.day, next);
     });
-    this.speakers.say(lines.slice(0, 2), { chime: "down", caption: false });
+    this.speakers.say([`Due to budget cuts: ${change}.`], { chime: "down", caption: false });
   }
 
-  private memoLines(today: DayConfig, next: DayConfig): string[] {
-    const out: string[] = [];
-    if (next.boss) {
-      const kind = ENEMIES[next.bossType].bossKind;
-      if (kind) out.push(BOSS_INFO[kind].memo);
-    }
+  /** The single biggest change tomorrow (a boss, a new kind of coworker, or the chore load), for "Due to budget cuts: ...". */
+  memoChange(today: DayConfig, next: DayConfig): string {
+    const kind = next.boss ? ENEMIES[next.bossType].bossKind : undefined;
+    if (kind) return BOSS_INFO[kind].memo;
     const order: EnemyType[] = ["robot", "hr", "burnout", "manager", "fulltime"];
-    for (const t of order) {
-      if (out.length >= 2) break;
-      if (next.weights[t] && !today.weights[t] && NEW_TYPE_MEMO[t]) out.push(NEW_TYPE_MEMO[t]!);
-    }
-    if (next.growth === "more") out.push("Due to budget cuts, you'll be covering one more chore.");
-    else if (next.growth === "longer") out.push("Due to budget cuts, every chore will take a little longer.");
-    if (out.length < 3 && next.spawnEvery < today.spawnEvery) out.push("Due to budget cuts, the elevators will be running more often.");
-    out.push(`Tomorrow's firing quota: ${next.quota} employees (+${next.quota - today.quota}).`);
-    return out.slice(0, 4);
+    const fresh = order.find((t) => next.weights[t] && !today.weights[t] && NEW_TYPE_MEMO[t]);
+    if (fresh) return NEW_TYPE_MEMO[fresh]!;
+    if (next.growth === "more") return "one more chore on your plate";
+    if (next.growth === "longer") return "every chore runs a little longer";
+    return "the elevators run more often";
   }
 
   private gameOver() {

@@ -367,11 +367,11 @@ kbd { display: inline-block; min-width: 1.4em; padding: 1px 5px 0; border: 2px s
 
 /* ---------------------------------------------------------------- end-of-day memo */
 .memo { display: flex; flex-direction: column; align-items: center; gap: 22px; }
-.m-paper { position: relative; width: min(620px, 92vw); padding: 26px 30px 24px; background: var(--c-paper); background-image: repeating-linear-gradient(180deg, transparent 0 31px, rgba(47, 79, 143, .08) 31px 32px); border-radius: 3px; box-shadow: 0 4px 0 rgba(0, 0, 0, .25), 0 22px 40px rgba(0, 0, 0, .4); transform: rotate(-1deg); color: var(--c-ink); }
+.m-paper { position: relative; width: min(720px, 92vw); padding: 26px 30px 24px; background: var(--c-paper); background-image: repeating-linear-gradient(180deg, transparent 0 31px, rgba(47, 79, 143, .08) 31px 32px); border-radius: 3px; box-shadow: 0 4px 0 rgba(0, 0, 0, .25), 0 22px 40px rgba(0, 0, 0, .4); transform: rotate(-1deg); color: var(--c-ink); }
 .m-head { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 10px; border-bottom: 3px double var(--c-ink); font: 400 38px/1 var(--f-display); }
 .m-head .m-day { font-size: 26px; opacity: .6; }
-.m-meta { display: flex; gap: 22px; flex-wrap: wrap; margin: 12px 0 6px; font-size: 19px; opacity: .75; }
-.m-lines { margin: 10px 0 0; padding-left: 22px; display: grid; gap: 10px; font-size: 25px; line-height: 1.15; }
-.m-lines li::marker { color: var(--c-red); }
-.m-sign { margin-top: 18px; font-size: 19px; opacity: .6; }
+.m-line { margin: 20px 0 0; font-size: 28px; line-height: 1.15; }
+.m-line b { color: var(--c-red); font-weight: 400; }
+.m-quota { margin: 14px 0 6px; padding-right: 170px; font-size: 22px; opacity: .7; }
+.m-quota b { font-weight: 400; opacity: 1; }
 .m-stamp { position: absolute; right: 18px; bottom: 16px; padding: 6px 12px 3px; border: 4px solid var(--c-red); border-radius: 6px; color: var(--c-red); font: 400 30px/1 var(--f-display); transform: rotate(-10deg); opacity: .9; }

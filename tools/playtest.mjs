@@ -284,8 +284,21 @@ try {
     console.log("hatchet states seen:", [...seen].join(", "));
     console.log("memo lines:");
     for (let d = 1; d <= 9; d++) {
-      const lines = await ev((day) => { const h = window.__HT; return h.scene.memoLines(h.dayConfig(day), h.dayConfig(day + 1)); }, d);
-      console.log(d, "->", d + 1, JSON.stringify(lines));
+      const line = await ev((day) => { const h = window.__HT; return h.scene.memoChange(h.dayConfig(day), h.dayConfig(day + 1)); }, d);
+      console.log(d, "->", d + 1, `Due to budget cuts: ${line}.`);
+    }
+  }
+
+  // The end-of-day memo for a couple of days (one line each).
+  if (scenario === "memo") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    for (const day of [1, 2, 5]) {
+      await ev((d) => { const h = window.__HT; h.state.day = d; h.scene.dayCfg = h.dayConfig(d); h.scene.endOfDayMemo(); }, day);
+      await sleep(1800);
+      await shot(`memo-${day}`);
+      await ev(() => window.__HT.scene.ui.closeScreen("memo"));
     }
   }
 

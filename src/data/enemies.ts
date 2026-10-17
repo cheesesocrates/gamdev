@@ -38,22 +38,22 @@ export interface EnemyDef {
 /** The pose a coworker uses while still at their desk (before 5 PM). */
 export const standPose = (sprite: string) => sprite.replace(/_(hold|gun|machine|silencer)$/, "_stand");
 
-/** How each boss is announced: the banner, the PA, and the night-before memo. */
+/** How each boss is announced: the banner, the PA, and the night-before memo ("Due to budget cuts: <memo>."). */
 export const BOSS_INFO: Record<BossKind, { sub: string; pa: string; memo: string }> = {
   hatchet: {
     sub: "is here to make some cuts",
     pa: "Attention all staff. The Hatchet Man is on the floor. Please stand clear of the walls.",
-    memo: "Due to budget cuts, the Hatchet Man will personally oversee tomorrow's restructuring."
+    memo: "the Hatchet Man makes the cuts himself"
   },
   caller: {
     sub: "has a few calls to make",
     pa: "Attention all staff. The Cold Caller is on the line. Ringing phones blow up: keep clear of the red rings.",
-    memo: "Due to budget cuts, the Cold Caller will be dialing in tomorrow. Ringing phones explode."
+    memo: "the Cold Caller dials in (phones explode)"
   },
   consultant: {
     sub: "has been brought in to 'optimize headcount'",
     pa: "Attention all staff. An external consultant has arrived to optimize headcount.",
-    memo: "Due to budget cuts, an external consultant will be optimizing headcount tomorrow."
+    memo: "a consultant is optimizing headcount"
   }
 };
 

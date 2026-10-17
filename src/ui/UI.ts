@@ -851,15 +851,14 @@ export class UI {
     gsap.delayedCall(0.55, () => next());
   }
 
-  /** End of the day: management's memo about what changes tomorrow (read out over the PA). */
-  showMemo(d: { day: number; lines: string[] }, onDone: () => void) {
+  /** End of the day: management's one-line memo about what changes tomorrow (read out over the PA). */
+  showMemo(d: { day: number; change: string; quota: number }, onDone: () => void) {
     const el = this.screen("memo", "dim", `
       <div class="memo clickable">
         <div class="m-paper">
           <div class="m-head"><span>INTERNAL MEMO</span><span class="m-day">DAY ${d.day}</span></div>
-          <div class="m-meta"><div><b>TO:</b> All Staff</div><div><b>FROM:</b> Management</div><div><b>RE:</b> Tomorrow</div></div>
-          <ul class="m-lines">${d.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>
-          <div class="m-sign">Thank you for your continued sacrifice.</div>
+          <p class="m-line"><b>Due to budget cuts:</b> ${esc(d.change)}.</p>
+          <div class="m-quota">Tomorrow's quota: <b>${d.quota}</b></div>
           <div class="m-stamp">BUDGET CUTS</div>
         </div>
         <button class="btn big red" id="mgo">CLOCK IN FOR DAY ${d.day}</button>
@@ -877,8 +876,8 @@ export class UI {
     window.addEventListener("keydown", onKey, true);
     $("#mgo", el).addEventListener("click", go);
     this.slideUp([...el.querySelectorAll(".m-paper, #mgo")]);
-    gsap.from(el.querySelectorAll(".m-lines li"), { x: -24, opacity: 0, duration: 0.35, delay: 0.45, stagger: 0.18, ease: "power3.out" });
-    gsap.fromTo($(".m-stamp", el), { scale: 3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.28, delay: 0.9 + d.lines.length * 0.18, ease: "power4.in", onComplete: () => this.sfx?.("stamp") });
+    gsap.from(el.querySelectorAll(".m-line, .m-quota"), { x: -24, opacity: 0, duration: 0.35, delay: 0.45, stagger: 0.18, ease: "power3.out" });
+    gsap.fromTo($(".m-stamp", el), { scale: 3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.28, delay: 1.1, ease: "power4.in", onComplete: () => this.sfx?.("stamp") });
   }
 
   showAnnounce(onSkip: () => void): (i: number, text: string, cls?: string) => void {

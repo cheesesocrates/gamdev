@@ -27,6 +27,9 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Fix (UI): more dead space past the office's outer walls. In a corner the camera used to stop at the edge of the map,
   so you ended up hidden under the HUD (the to-do note, hearts or minimap); now it can keep scrolling and you stay in
   the open part of the screen.
+- UI: the end-of-day internal memo is one line now: "**Due to budget cuts:** the Hatchet Man makes the cuts himself."
+  (written once, with the single biggest change for tomorrow: a boss, a new kind of coworker, or the chore load), plus
+  tomorrow's quota. No more four bullet points that all start with "Due to budget cuts". The PA reads the same line.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.
