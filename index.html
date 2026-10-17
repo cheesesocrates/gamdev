@@ -3,20 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Hostile Takeover</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💼</text></svg>">
+  <title>Rather Die Than Get Fired</title>
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="preload" href="assets/fonts/Jersey10-Regular.ttf" as="font" type="font/ttf" crossorigin>
   <style>
-    html, body { margin: 0; height: 100%; background: #0b0c10; overflow: hidden; }
-    #boot { position: fixed; inset: 0; display: grid; place-items: center; background: #0b0c10; z-index: 50; transition: opacity .5s; font-family: Inter, system-ui, sans-serif; color: #e8ecf2; }
-    #boot .box { width: min(420px, 80vw); text-align: center; }
-    #boot h1 { font-family: "Archivo Black", Impact, sans-serif; font-size: 34px; letter-spacing: 1px; margin: 0 0 18px; }
-    #boot h1 span { color: #e6304a; }
-    #boot .track { height: 6px; background: #1d2129; border-radius: 3px; overflow: hidden; }
-    #boot-bar { height: 100%; width: 0; background: linear-gradient(90deg, #e6304a, #ffcf3f); transition: width .15s; }
-    #boot p { color: #8b95a7; font-size: 13px; margin-top: 12px; }
+    @font-face { font-family: "Jersey 10"; src: url("assets/fonts/Jersey10-Regular.ttf") format("truetype"); font-display: swap; }
+    html, body { margin: 0; height: 100%; background: #1c1d21; overflow: hidden; }
+    #boot { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: #1c1d21; transition: opacity .5s; font-family: "Jersey 10", "Courier New", monospace; color: #f7f4ea; }
+    #boot .box { width: min(480px, 86vw); text-align: center; }
+    #boot .boot-logo { display: block; width: min(460px, 82vw); margin: 0 auto 22px; }
+    #boot .track { height: 20px; border: 3px solid #f7f4ea; border-radius: 2px; overflow: hidden; }
+    #boot-bar { height: 100%; width: 0; background: #e9c25a; transition: width .15s; }
+    #boot p { margin-top: 16px; font-size: 24px; letter-spacing: 1px; color: #ece5d3; }
   </style>
 </head>
 <body>
@@ -24,9 +23,9 @@
   <div id="ui"></div>
   <div id="boot">
     <div class="box">
-      <h1>HOSTILE <span>TAKEOVER</span></h1>
+      <img class="boot-logo" src="assets/ui/logo.png" alt="Rather Die Than Get Fired">
       <div class="track"><div id="boot-bar"></div></div>
-      <p>Loading the office&hellip;</p>
+      <p>LOADING THE OFFICE&hellip;</p>
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>

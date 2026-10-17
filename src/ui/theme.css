@@ -1,0 +1,23 @@
+/* Office after hours: copy paper, manila folders, toner black and rubber-stamp red. One pixel typeface. */
+/* The Jersey 10 @font-face lives in index.html so the boot screen can use it too. */
+:root {
+  --c-ink: #1c1d21;      /* toner black */
+  --c-ink-2: #2a2c33;    /* dark office at night */
+  --c-ink-3: #3a3c44;
+  --c-cream: #ece5d3;    /* card stock */
+  --c-paper: #f7f4ea;    /* copy paper */
+  --c-yellow: #e9c25a;   /* manila folder */
+  --c-sticky: #f2d061;   /* sticky note */
+  --c-orange: #c97a3a;   /* folder tab */
+  --c-red: #c4382c;      /* rubber stamp */
+  --c-violet: #5b6380;   /* slate */
+  --c-blue: #2f4f8f;     /* ballpoint */
+  --c-cyan: #6aa3b4;     /* cubicle teal */
+  --c-green: #4b9a63;    /* APPROVED */
+  --c-grey: #8f97a3;     /* cubicle fabric */
+  --f-display: "Jersey 10", "Courier New", monospace;
+  --f-body: "Jersey 10", "Courier New", monospace;
+}
+
+/* Jersey 10 has a single weight: never fake a bold or italic. */
+html { font-synthesis: none; }

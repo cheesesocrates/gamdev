@@ -1,0 +1,157 @@
+import { TILE } from "../config";
+import { GameState } from "../systems/GameState";
+import { clamp, pick } from "../util/math";
+import type { GameScene } from "../scenes/GameScene";
+import type { FurnObj } from "./Furniture";
+import type { Collider } from "./World";
+
+/** Furniture light enough to shove around: break-room tables, coffee tables, desks and boxes. */
+const PUSHABLE = /^(break_table|coffee_table|box|ws_[abc]_\d+|ws_hr)$/;
+
+interface Prop {
+  f: FurnObj;
+  homeX: number;
+  homeY: number;
+  vx: number;
+  vy: number;
+  mass: number;
+  moving: boolean;
+  /** Colliders it already overlaps at home (cubicle partitions): ignored so desks can slide out. */
+  neighbours: Set<Collider>;
+  hitCd: Map<number, number>;
+}
+
+/**
+ * Pushable furniture. Lean into a table and it slides; dodge-roll into it and it
+ * flies, bowling over any coworker in its way. Everything goes back overnight.
+ */
+export class Props {
+  list: Prop[] = [];
+  private navDirty = false;
+  private navT = 0;
+
+  constructor(private g: GameScene, furniture: Map<string, FurnObj>, skip: Set<FurnObj>) {
+    for (const f of furniture.values()) {
+      if (!f.collider || !f.collider.solid || skip.has(f) || !PUSHABLE.test(f.key)) continue;
+      const neighbours = new Set<Collider>();
+      g.world.queryBox(f.x - f.w / 2 - 2, f.y - f.h / 2 - 2, f.x + f.w / 2 + 2, f.y + f.h / 2 + 2, (c) => { if (c !== f.collider) neighbours.add(c); });
+      const area = (f.w * f.h) / (TILE * TILE);
+      this.list.push({ f, homeX: f.x, homeY: f.y, vx: 0, vy: 0, mass: Math.max(0.6, area * 1.6), moving: false, neighbours, hitCd: new Map() });
+    }
+  }
+
+  /** Overnight the cleaners put every desk back where it belongs. */
+  reset() {
+    for (const p of this.list) {
+      p.vx = p.vy = 0;
+      p.moving = false;
+      p.hitCd.clear();
+      this.place(p, p.homeX, p.homeY);
+    }
+  }
+
+  private place(p: Prop, x: number, y: number) {
+    const f = p.f;
+    f.x = x;
+    f.y = y;
+    this.g.world.moveCollider(f.collider!, x - f.w / 2, y - f.h / 2, x + f.w / 2, y + f.h / 2);
+    f.sprite.setPosition(x, y).setDepth(y + f.h / 2);
+  }
+
+  private free(p: Prop, x: number, y: number) {
+    const f = p.f;
+    return this.g.world.boxFree(x - f.w / 2 + 1, y - f.h / 2 + 1, x + f.w / 2 - 1, y + f.h / 2 - 1, f.collider!, p.neighbours);
+  }
+
+  update(dt: number) {
+    const g = this.g, pl = g.player;
+    if (g.phase === "title" || pl.dead) return;
+    const jockey = GameState.stats.deskJockey;
+    for (const p of this.list) {
+      const f = p.f;
+      // Is the boss leaning on it?
+      const cx = clamp(pl.x, f.x - f.w / 2, f.x + f.w / 2), cy = clamp(pl.y, f.y - f.h / 2, f.y + f.h / 2);
+      const dx = pl.x - cx, dy = pl.y - cy;
+      if (dx * dx + dy * dy < (pl.r + 3) ** 2) {
+        const horiz = Math.abs(dx) > Math.abs(dy);
+        const nx = horiz ? -Math.sign(dx) : 0, ny = horiz ? 0 : -Math.sign(dy);
+        const into = pl.vx * nx + pl.vy * ny;
+        const kick = (1100 / Math.sqrt(p.mass)) * (jockey ? 1.6 : 1);
+        if (pl.rolling > 0 && into > 100 && Math.hypot(p.vx, p.vy) < kick * 0.6) {
+          // Dodge-roll into it: a proper shove.
+          p.vx = nx * kick;
+          p.vy = ny * kick;
+          p.moving = true;
+          g.audio.play("wood_heavy", { vol: 0.55, minGap: 120 });
+          g.fx.shake(0.15);
+          g.fx.burst("pixel", f.x, f.y, 8, 0xd8c3a5);
+        } else if (into > 40) {
+          const want = into * 0.9 * Math.min(1, 2.2 / p.mass) * (jockey ? 1.5 : 1);
+          if (horiz) p.vx = nx * Math.max(Math.abs(p.vx), want); else p.vy = ny * Math.max(Math.abs(p.vy), want);
+          p.moving = true;
+        }
+      }
+      if (!p.moving) continue;
+      const speed = Math.hypot(p.vx, p.vy);
+      if (speed < 6) {
+        p.vx = p.vy = 0;
+        p.moving = false;
+        this.navDirty = true;
+        continue;
+      }
+      const steps = Math.max(1, Math.ceil((speed * dt) / 8));
+      for (let s = 0; s < steps; s++) {
+        const sx = (p.vx * dt) / steps, sy = (p.vy * dt) / steps;
+        if (sx) {
+          if (this.free(p, f.x + sx, f.y)) this.place(p, f.x + sx, f.y);
+          else { this.bump(p, Math.abs(p.vx)); p.vx *= -0.25; }
+        }
+        if (sy) {
+          if (this.free(p, f.x, f.y + sy)) this.place(p, f.x, f.y + sy);
+          else { this.bump(p, Math.abs(p.vy)); p.vy *= -0.25; }
+        }
+      }
+      if (speed > 160 && g.phase === "downsizing") this.ram(p, speed);
+      const fr = Math.pow(0.08, dt);
+      p.vx *= fr;
+      p.vy *= fr;
+      for (const [id, t] of p.hitCd) {
+        if (t - dt <= 0) p.hitCd.delete(id); else p.hitCd.set(id, t - dt);
+      }
+    }
+    this.navT -= dt;
+    if (this.navDirty && this.navT <= 0) {
+      this.navDirty = false;
+      this.navT = 0.4;
+      g.world.rebuildNav();
+    }
+  }
+
+  private bump(p: Prop, speed: number) {
+    if (speed < 160) return;
+    const g = this.g;
+    g.audio.play("wood", { vol: Math.min(0.6, speed / 900), minGap: 90 });
+    g.fx.burst("pixel", p.f.x, p.f.y, 5, 0xd8c3a5);
+  }
+
+  /** A desk at full speed bowls coworkers over. */
+  private ram(p: Prop, speed: number) {
+    const g = this.g, f = p.f;
+    const jockey = GameState.stats.deskJockey;
+    for (const e of [...g.enemies]) {
+      if (e.dead || !e.hostile || p.hitCd.has(e.id)) continue;
+      const cx = clamp(e.x, f.x - f.w / 2, f.x + f.w / 2), cy = clamp(e.y, f.y - f.h / 2, f.y + f.h / 2);
+      if ((e.x - cx) ** 2 + (e.y - cy) ** 2 > (e.r + 8) ** 2) continue;
+      p.hitCd.set(e.id, 0.5);
+      const ang = Math.atan2(p.vy, p.vx);
+      e.stun = Math.max(e.stun, 0.8);
+      const dmg = (12 + speed * 0.04) * Math.sqrt(p.mass) * GameState.stats.dmgMult * (jockey ? 3 : 1);
+      g.fx.text(e.x, e.y - 40, pick(["DESK'D!", "TABLE FLIP!", "OOF!", "WRONG DESK!"]), { color: "#e9c25a", size: 17, pop: true, dur: 0.7 });
+      g.audio.play("hit_heavy", { vol: 0.5, minGap: 60 });
+      g.fx.shake(0.2);
+      g.hitEnemy(e, dmg, { angle: ang, kind: "chair", x: e.x, y: e.y, knock: speed * 0.9 });
+      p.vx *= 0.65;
+      p.vy *= 0.65;
+    }
+  }
+}

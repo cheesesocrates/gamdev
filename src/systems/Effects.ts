@@ -70,17 +70,18 @@ export class Effects {
     if (!ft) {
       if (this.texts.length > 70) ft = this.texts.reduce((a, b) => (a.life < b.life ? a : b));
       else {
-        const obj = this.scene.add.text(0, 0, "", { fontFamily: "'Archivo Black', Impact, sans-serif", fontSize: "20px", color: "#fff" });
-        obj.setOrigin(0.5).setDepth(DEPTH.WORLD_UI).setResolution(2);
+        const obj = this.scene.add.text(0, 0, "", { fontFamily: "'Jersey 10', 'Courier New', monospace", fontSize: "28px", color: "#fff" });
+        obj.setOrigin(0.5).setDepth(DEPTH.WORLD_UI).setResolution(2).setShadow(0, 3, "rgba(18,18,22,0.9)", 0, false, true);
         ft = { obj, life: 0, maxLife: 1, vy: 0, active: false, pop: 0 };
         this.texts.push(ft);
       }
     }
-    const size = opts.size ?? 20;
+    // Jersey 10 runs small and narrow: scale every popup up a notch.
+    const size = Math.round((opts.size ?? 20) * 1.45);
     ft.obj.setText(str);
     ft.obj.setFontSize(size);
     ft.obj.setColor(opts.color ?? "#ffffff");
-    ft.obj.setStroke(opts.stroke ?? "#14161c", Math.max(3, size * 0.22));
+    ft.obj.setStroke("#000000", 0);
     ft.obj.setPosition(x, y);
     ft.obj.setAlpha(1).setVisible(true).setScale(1);
     ft.maxLife = ft.life = opts.dur ?? 0.8;

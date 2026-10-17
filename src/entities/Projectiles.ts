@@ -1,12 +1,26 @@
 import Phaser from "phaser";
 import { DEPTH } from "../config";
 import { GameState } from "../systems/GameState";
-import { rand, angleDiff } from "../util/math";
+import { rand, angleDiff, chance, pick } from "../util/math";
+import { TILE } from "../config";
 import { Tile } from "../world/OfficeMap";
 import type { GameScene } from "../scenes/GameScene";
 import type { Enemy } from "./Enemy";
 
-export type ProjKind = "staple" | "coffee" | "shard" | "calc" | "memo" | "bolt" | "wave";
+export type ProjKind = "staple" | "coffee" | "shard" | "calc" | "memo" | "bolt" | "wave" | "plane" | "confetti" | "drop" | "slip" | "toner";
+export type PlayerShot = "staple" | "coffee" | "shard" | "plane" | "confetti" | "drop" | "slip";
+
+const SHOT: Record<PlayerShot, { speed: number; dmg: number; range: number; radius: number }> = {
+  staple: { speed: 1020, dmg: 13, range: 820, radius: 6 },
+  coffee: { speed: 700, dmg: 7.5, range: 330, radius: 7 },
+  shard: { speed: 800, dmg: 6, range: 380, radius: 6 },
+  plane: { speed: 540, dmg: 17, range: 1150, radius: 10 },
+  confetti: { speed: 780, dmg: 4.6, range: 540, radius: 5 },
+  drop: { speed: 520, dmg: 2.5, range: 300, radius: 7 },
+  slip: { speed: 820, dmg: 17, range: 720, radius: 9 }
+};
+const KNOCK: Partial<Record<ProjKind, number>> = { coffee: 260, staple: 120, plane: 150, slip: 90, confetti: 40, drop: 30, shard: 80 };
+const CONFETTI = [0xc4382c, 0xe9c25a, 0x6aa3b4, 0x4b9a63, 0x5b6380, 0xc97a3a];
 
 export interface Proj {
   active: boolean;
@@ -29,10 +43,23 @@ export interface Proj {
   sprite: Phaser.GameObjects.Image;
   trail: number;
   stun: number;
+  hot: boolean;
+  boomerang: boolean;
+  returning: boolean;
+  maxRange: number;
+  /** Has ricocheted at least once: comes in at angles a riot shield can't cover. */
+  bounced: boolean;
+  /** An enemy shot the keyboard swatted back. */
+  deflected: boolean;
+  /** Who fired it (enemy shots). */
+  owner: Enemy | null;
+  /** Black Hole Binder: opens a vortex wherever it lands. */
+  vortex: boolean;
 }
 
 const TEX: Record<ProjKind, string> = {
-  staple: "p_staple", coffee: "p_coffee", shard: "p_staple", calc: "p_calc", memo: "p_memo", bolt: "p_bolt", wave: "p_wave"
+  staple: "p_staple", coffee: "p_coffee", shard: "p_staple", calc: "p_calc", memo: "p_memo", bolt: "p_bolt", wave: "p_wave",
+  plane: "p_plane", confetti: "p_confetti", drop: "p_drop", slip: "p_slip", toner: "p_toner"
 };
 
 export class Projectiles {
@@ -49,48 +76,115 @@ export class Projectiles {
       const sprite = this.g.add.image(0, 0, "p_staple").setDepth(DEPTH.PROJECTILE);
       p = {
         active: false, friendly: true, kind: "staple", x: 0, y: 0, vx: 0, vy: 0, dmg: 0, range: 0, radius: 6,
-        pierce: 0, bounces: 0, homing: 0, explode: 0, canSplit: false, spin: 0, hit: new Set(), sprite, trail: 0, stun: 0
+        pierce: 0, bounces: 0, homing: 0, explode: 0, canSplit: false, spin: 0, hit: new Set(), sprite, trail: 0, stun: 0,
+        hot: false, boomerang: false, returning: false, maxRange: 0, bounced: false, deflected: false, owner: null, vortex: false
       };
       this.list.push(p);
     }
     p.active = true;
     p.hit.clear();
+    p.hot = false;
+    p.boomerang = false;
+    p.returning = false;
+    p.bounced = false;
+    p.deflected = false;
+    p.owner = null;
+    p.vortex = false;
     p.sprite.setVisible(true).setAlpha(1).clearTint().setBlendMode(Phaser.BlendModes.NORMAL);
     return p;
   }
 
   /** Player shot with every upgrade applied. */
-  firePlayer(kind: "staple" | "coffee" | "shard", x: number, y: number, angle: number, speedJitter = 1): Proj {
+  firePlayer(kind: PlayerShot, x: number, y: number, angle: number, speedJitter = 1): Proj {
     const st = GameState.stats;
+    const S = SHOT[kind];
     const p = this.obtain();
     p.friendly = true;
     p.kind = kind;
     p.x = x;
     p.y = y;
-    const base = kind === "staple" ? 1020 : kind === "coffee" ? 700 : 800;
-    const speed = base * st.projSpeedMult * speedJitter;
+    const speed = S.speed * st.projSpeedMult * speedJitter;
     p.vx = Math.cos(angle) * speed;
     p.vy = Math.sin(angle) * speed;
-    p.dmg = (kind === "staple" ? 11 : kind === "coffee" ? 7.5 : 6) * st.dmgMult;
-    p.range = (kind === "staple" ? 820 : kind === "coffee" ? 330 : 380) * st.projSpeedMult;
-    p.radius = (kind === "coffee" ? 7 : 6) * st.sizeMult;
-    p.pierce = st.pierce + (kind === "shard" ? 1 : 0);
-    p.bounces = kind === "coffee" ? Math.ceil(st.bounces / 2) : st.bounces;
-    p.homing = kind === "shard" ? 0 : st.homing;
-    p.explode = st.explode;
-    p.canSplit = kind !== "shard" && st.split > 0;
-    p.spin = 0;
+    p.dmg = S.dmg * st.dmgMult;
+    p.range = S.range * st.projSpeedMult;
+    p.maxRange = p.range;
+    p.boomerang = kind === "staple" && st.boomerang;
+    p.radius = S.radius * st.sizeMult;
+    p.pierce = st.pierce + (kind === "shard" ? 1 : kind === "slip" ? 3 : 0);
+    p.bounces = kind === "coffee" || kind === "drop" ? Math.ceil(st.bounces / 2) : st.bounces;
+    p.homing = kind === "shard" || kind === "drop" ? 0 : kind === "plane" ? 2.2 + st.homing : st.homing;
+    // Spray weapons skip the explosive/splitting upgrades (they'd carpet-bomb the office).
+    const spray = kind === "confetti" || kind === "drop";
+    p.explode = spray ? 0 : st.explode;
+    p.canSplit = kind !== "shard" && !spray && st.split > 0;
+    p.spin = kind === "slip" ? 18 : 0;
     p.stun = 0;
     p.trail = 0;
     p.sprite.setTexture(TEX[kind]).setScale(st.sizeMult * (kind === "shard" ? 0.7 : 1));
     if (kind === "shard") p.sprite.setTint(0xffe28a);
+    if (kind === "confetti") p.sprite.setTint(pick(CONFETTI));
+    // Black Hole Binder: every few seconds one shot carries a vortex.
+    const pl = this.g.player;
+    if (st.binder && !spray && kind !== "shard" && pl.binderReady) {
+      pl.binderReady = false;
+      pl.binderCd = st.binder >= 2 ? 4.5 : 6;
+      p.vortex = true;
+      p.sprite.setTint(0x6b6f9a).setScale(p.sprite.scaleX * 1.4);
+    }
     p.sprite.setRotation(angle);
     return p;
   }
 
-  fireEnemy(kind: "calc" | "memo" | "bolt" | "wave", x: number, y: number, angle: number, speed: number, dmg: number) {
+  /** Toner Bomb: an arcing cartridge that sails over furniture and bursts where it lands. */
+  lobToner(x: number, y: number, angle: number, dist: number): Proj {
+    const p = this.obtain();
+    p.friendly = true;
+    p.kind = "toner";
+    p.x = x;
+    p.y = y;
+    const flight = 0.32 + dist / 1400;
+    p.vx = Math.cos(angle) * (dist / flight);
+    p.vy = Math.sin(angle) * (dist / flight);
+    p.dmg = 70 * GameState.stats.dmgMult;
+    p.range = p.maxRange = dist;
+    p.radius = 8;
+    p.pierce = 0;
+    p.bounces = 0;
+    p.homing = 0;
+    p.explode = 0;
+    p.canSplit = false;
+    p.spin = 9;
+    p.stun = 0;
+    p.trail = 0;
+    p.sprite.setTexture("p_toner").setScale(1).setRotation(angle);
+    return p;
+  }
+
+  /** Keyboard parry: an enemy shot turns around and works for the boss now. */
+  deflect(p: Proj, angle: number) {
+    const st = GameState.stats;
+    p.friendly = true;
+    p.deflected = true;
+    const sp = Math.max(650, Math.hypot(p.vx, p.vy) * 1.3);
+    p.vx = Math.cos(angle) * sp;
+    p.vy = Math.sin(angle) * sp;
+    p.dmg = 24 * st.dmgMult;
+    p.range = p.maxRange = p.kind === "wave" ? 300 : 800;
+    p.hit.clear();
+    p.pierce = st.pierce;
+    p.bounces = st.bounces;
+    p.homing = 0;
+    p.explode = 0;
+    p.canSplit = false;
+    p.stun = 0;
+    p.sprite.setTint(0xe9c25a);
+  }
+
+  fireEnemy(kind: "calc" | "memo" | "bolt" | "wave", x: number, y: number, angle: number, speed: number, dmg: number, owner: Enemy | null = null) {
     const p = this.obtain();
     p.friendly = false;
+    p.owner = owner;
     p.kind = kind;
     p.x = x;
     p.y = y;
@@ -109,6 +203,13 @@ export class Projectiles {
     p.trail = 0;
     p.sprite.setTexture(TEX[kind]).setScale(kind === "wave" ? 1.3 : 1).setRotation(angle);
     if (kind === "bolt") p.sprite.setBlendMode(Phaser.BlendModes.ADD);
+  }
+
+  /** Hot Desking: a double-damage, gold-glowing shot. */
+  makeHot(p: Proj) {
+    p.hot = true;
+    p.dmg *= 2;
+    p.sprite.setTint(0xffc23a).setScale(p.sprite.scaleX * 1.3);
   }
 
   clear() {
@@ -142,9 +243,16 @@ export class Projectiles {
       const steps = Math.max(1, Math.ceil(travel / 7));
       const sdt = dt / steps;
       let alive = true;
+      if (p.returning) {
+        const dx = g.player.x - p.x, dy = g.player.y - p.y;
+        const d = Math.hypot(dx, dy) || 1;
+        p.vx = (dx / d) * speed;
+        p.vy = (dy / d) * speed;
+        if (d < 26) { this.kill(p); continue; }
+      }
       for (let s = 0; s < steps && alive; s++) {
         const nx = p.x + p.vx * sdt, ny = p.y + p.vy * sdt;
-        const hit = g.world.shotBlockedAt(nx, ny);
+        const hit = p.returning ? null : p.kind === "toner" ? this.wallAt(nx, ny) : g.world.shotBlockedAt(nx, ny);
         if (hit) {
           alive = this.onSolid(p, nx, ny, hit, sdt);
           continue;
@@ -152,20 +260,29 @@ export class Projectiles {
         p.x = nx;
         p.y = ny;
         p.range -= speed * sdt;
-        if (p.range <= 0) { alive = false; this.expire(p); break; }
-        alive = p.friendly ? this.hitEnemies(p) : this.hitPlayerSide(p);
+        if (p.range <= 0) {
+          if (p.boomerang && !p.returning) {
+            p.returning = true;
+            p.range = p.maxRange * 1.5;
+            p.hit.clear();
+            continue;
+          }
+          alive = false; this.expire(p); break;
+        }
+        if (p.kind !== "toner") alive = p.friendly ? this.hitEnemies(p) : this.hitPlayerSide(p);
       }
       if (!alive) { this.kill(p); continue; }
 
       p.sprite.setPosition(p.x, p.y);
       if (p.spin) p.sprite.rotation += p.spin * dt;
       else p.sprite.setRotation(Math.atan2(p.vy, p.vx));
-      if (p.kind === "coffee") p.sprite.setAlpha(Math.min(1, p.range / 80));
+      if (p.kind === "coffee" || p.kind === "drop") p.sprite.setAlpha(Math.min(1, p.range / 80));
+      if (p.kind === "toner") p.sprite.setScale(1 + Math.sin((1 - p.range / p.maxRange) * Math.PI) * 0.8);
       if (p.kind === "wave") p.sprite.setScale(1.3 + (300 - p.range) / 160).setAlpha(Math.min(1, p.range / 120));
       p.trail -= dt;
       if (p.trail <= 0 && (p.kind === "bolt" || (p.friendly && (p.homing || p.explode)))) {
         p.trail = 0.03;
-        g.fx.burst("spark", p.x, p.y, 1, p.kind === "bolt" ? 0x6fd8ff : p.explode ? 0xffa040 : 0xffe28a);
+        g.fx.burst("spark", p.x, p.y, 1, p.kind === "bolt" ? 0x6fd8ff : p.explode ? 0xd98a3a : 0xffe28a);
       }
     }
   }
@@ -183,6 +300,7 @@ export class Projectiles {
     if (p.kind === "wave") return false;
     if (p.friendly && p.bounces > 0) {
       p.bounces--;
+      p.bounced = true;
       const r = g.world.reflect(p.x, p.y, p.vx, p.vy, sdt);
       p.vx = r.vx;
       p.vy = r.vy;
@@ -195,14 +313,29 @@ export class Projectiles {
     return false;
   }
 
+  /** Lobbed shots only collide with walls (they fly over desks). */
+  private wallAt(x: number, y: number) {
+    const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+    const tile = this.g.world.tile(tx, ty);
+    return tile !== Tile.FLOOR ? { type: "tile" as const, tx, ty, tile } : null;
+  }
+
   private impact(p: Proj, x: number, y: number, angle: number) {
     const g = this.g;
+    if (p.vortex) { p.vortex = false; g.vortex(x, y); }
+    if (p.kind === "toner") { g.tonerBlast(x, y); return; }
+    if (p.kind === "drop") {
+      g.fx.burst("water", x, y, 2);
+      if (chance(0.14)) g.hazards.addWater(g.hazards.idx(x - Math.cos(angle) * 10, y - Math.sin(angle) * 10));
+      return;
+    }
     if (p.friendly && p.explode > 0) {
       g.explosion(x, y, 55 + p.explode * 20, p.dmg * 0.75, { friendly: true, small: true });
       return;
     }
     if (p.kind === "coffee") {
       g.fx.burst("coffee", x, y, 4);
+      if (GameState.stats.irish && Math.random() < 0.35) g.hazards.igniteAt(x, y, 1.4);
       if (Math.random() < 0.25) g.fx.decal(x, y, "h_coffee", { scale: rand(0.3, 0.5), alpha: 0.7 });
     } else if (p.kind === "calc") {
       g.fx.burst("pixel", x, y, 8, 0x3a404b);
@@ -216,6 +349,12 @@ export class Projectiles {
   }
 
   private expire(p: Proj) {
+    if (p.vortex) { p.vortex = false; this.g.vortex(p.x, p.y); }
+    if (p.kind === "toner") { this.g.tonerBlast(p.x, p.y); return; }
+    if (p.kind === "drop") {
+      if (chance(0.07)) this.g.hazards.addWater(this.g.hazards.idx(p.x, p.y));
+      return;
+    }
     if (p.friendly && p.explode > 0 && p.kind !== "coffee") this.impact(p, p.x, p.y, 0);
     if (p.kind === "coffee") this.g.fx.burst("coffee", p.x, p.y, 2);
   }
@@ -228,9 +367,11 @@ export class Projectiles {
       const dx = e.x - p.x, dy = e.y - p.y;
       if (dx * dx + dy * dy > rr * rr) continue;
       const ang = Math.atan2(p.vy, p.vx);
-      if (e.blocksShot(ang)) {
+      if (!p.bounced && e.blocksShot(ang)) {
         g.fx.spray("spark", p.x, p.y, 6, ang + Math.PI, 40, 0xffffff);
         g.audio.play("ping", { vol: 0.25, minGap: 60 });
+        g.fx.text(e.x, e.y - 40, "BLOCKED", { color: "#c9d1e6", size: 13, dur: 0.5 });
+        g.tipOnce("shield", "Riot shields block shots from the front. Slip them in water, or bounce shots off a wall to hit them!", "#e9c25a");
         if (p.bounces > 0) {
           p.bounces--;
           p.vx = -p.vx; p.vy = -p.vy;
@@ -240,7 +381,15 @@ export class Projectiles {
         return false;
       }
       p.hit.add(e.id);
-      const killed = g.hitEnemy(e, p.dmg, { angle: ang, kind: p.kind, x: p.x, y: p.y, knock: p.kind === "coffee" ? 260 : 120 });
+      if (p.bounced && e.def.shield) {
+        p.dmg *= 1.5;
+        g.fx.text(e.x, e.y - 46, "TRICK SHOT!", { color: "#6aa3b4", size: 16, pop: true, dur: 0.8 });
+      }
+      const spray = p.kind === "drop" || p.kind === "confetti";
+      const killed = g.hitEnemy(e, p.dmg, { angle: ang, kind: p.deflected ? "deflect" : p.kind, x: p.x, y: p.y, knock: KNOCK[p.kind] ?? 120, silent: spray });
+      if (p.kind === "drop") e.soaked = Math.max(e.soaked, 4);
+      if (p.vortex) { p.vortex = false; g.vortex(p.x, p.y); }
+      if (spray) g.audio.play("hit", { vol: 0.12, rate: 1.5, minGap: 70 });
       if (p.explode > 0) g.explosion(p.x, p.y, 55 + p.explode * 20, p.dmg * 0.75, { friendly: true, small: true, skip: e });
       if (killed && p.canSplit) this.split(p, e);
       if (p.pierce > 0) {
@@ -270,16 +419,26 @@ export class Projectiles {
         if (pl.rolling > 0 || pl.invuln > 0) return true; // dodge through
         if (p.stun > 0) {
           pl.stun = Math.max(pl.stun, p.stun);
-          g.fx.text(pl.x, pl.y - 34, "STUNNED", { color: "#ffd75a", size: 15, dur: 0.7 });
+          g.fx.text(pl.x, pl.y - 34, "STUNNED", { color: "#e9c25a", size: 15, dur: 0.7 });
         }
-        pl.damage(p.dmg, p.x - p.vx, p.y - p.vy, p.kind);
+        pl.damage(p.dmg, p.x - p.vx, p.y - p.vy, p.kind, p.owner ?? undefined);
         this.impact(p, p.x, p.y, Math.atan2(p.vy, p.vx));
         return false;
       }
     }
-    // Enemy fire can also hit the player's intern allies.
+    // Enemy fire can also hit the player's allies, and whoever the office is blaming right now.
     for (const a of g.enemies) {
-      if (a.dead || !a.ally) continue;
+      if (a.dead || a === p.owner) continue;
+      if (a.scapegoat > 0) {
+        const rr = a.r + p.radius;
+        if ((a.x - p.x) ** 2 + (a.y - p.y) ** 2 <= rr * rr) {
+          if (a.takeDamage(a.maxHp * 0.12, Math.atan2(p.vy, p.vx), 80)) g.killEnemy(a, false);
+          this.impact(p, p.x, p.y, Math.atan2(p.vy, p.vx));
+          return false;
+        }
+        continue;
+      }
+      if (!a.ally) continue;
       const rr = a.r + p.radius;
       if ((a.x - p.x) ** 2 + (a.y - p.y) ** 2 <= rr * rr) {
         a.takeDamage(p.dmg * 8, Math.atan2(p.vy, p.vx), 80);

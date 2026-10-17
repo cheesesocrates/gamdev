@@ -1,6 +1,11 @@
 // The office floor plan. Pure data: tiles, furniture placements,
 // interactable stations, doors and enemy spawn points. Everything is
 // expressed in tile units (1 = 64px) and converted to world pixels.
+//
+// Layout (64 x 46): a ring of halls around a concrete Server Core, big
+// open-plan wings east and west, and a row of distinct rooms along the
+// north and south edges. Interior walls are drywall: bosses and big
+// explosions can smash straight through them.
 import { MAP_W, MAP_H, TILE } from "../config";
 
 export const enum Tile {
@@ -8,7 +13,8 @@ export const enum Tile {
   FLOOR = 1,
   GLASS = 2,
   ELEVATOR = 3,
-  EXIT_DOOR = 4
+  EXIT_DOOR = 4,
+  DRYWALL = 5
 }
 
 export const enum Mat {
@@ -22,7 +28,9 @@ export const enum Mat {
   RESTROOM = 7,
   SERVER = 8,
   CONCRETE = 9,
-  STAIRS = 10
+  STAIRS = 10,
+  HALL = 11,
+  CARPET_TEAL = 12
 }
 
 export interface FurnPlacement {
@@ -39,7 +47,7 @@ export interface FurnPlacement {
 
 export type StationKind =
   | "emails" | "copier" | "shred" | "coffee" | "presentation" | "memos" | "server" | "plant"
-  | "cooler" | "powerstrip" | "vending" | "supply" | "toilet" | "arcade" | "fridge" | "barricade";
+  | "cooler" | "powerstrip" | "vending" | "supply" | "toilet" | "arcade" | "fridge";
 
 export interface StationDef {
   id: string;
@@ -85,6 +93,8 @@ export interface OfficeMap {
   h: number;
   tiles: Uint8Array;
   mats: Uint8Array;
+  /** Zone index per tile (-1 = walls). Used for room ambushes. */
+  zoneGrid: Int16Array;
   furniture: FurnPlacement[];
   stations: StationDef[];
   doors: DoorDef[];
@@ -96,6 +106,7 @@ export interface OfficeMap {
 }
 
 const P = (t: number) => t * TILE;
+const UP = -Math.PI / 2, DOWN = Math.PI / 2, LEFT = Math.PI, RIGHT = 0;
 
 export function buildOffice(): OfficeMap {
   const W = MAP_W, H = MAP_H;
@@ -114,27 +125,22 @@ export function buildOffice(): OfficeMap {
     tiles[y * W + x] = t;
     if (m !== undefined) mats[y * W + x] = m;
   };
+  const fill = (x0: number, y0: number, x1: number, y1: number, t: Tile, m?: Mat) => {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) set(x, y, t, m);
+  };
   const room = (name: string, x0: number, y0: number, x1: number, y1: number, m: Mat) => {
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) set(x, y, Tile.FLOOR, m);
+    fill(x0, y0, x1, y1, Tile.FLOOR, m);
     zones.push({ name, x0, y0, x1, y1 });
   };
   const matAt = (x: number, y: number) => mats[y * W + x];
   // Carve a doorway through a wall run; it inherits the floor of the room below/right.
   const door = (id: string, x0: number, y0: number, x1: number, y1: number, barricadable = true, mat?: Mat) => {
-    const m = mat ?? (matAt(x0, y1 + 1) || matAt(x1 + 1, y0) || Mat.CARPET);
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) set(x, y, Tile.FLOOR, m);
-    doors.push({
-      id,
-      x: P((x0 + x1 + 1) / 2),
-      y: P((y0 + y1 + 1) / 2),
-      w: P(x1 - x0 + 1),
-      h: P(y1 - y0 + 1),
-      barricadable
-    });
-    if (barricadable) stations.push({ id: `barricade_${id}`, kind: "barricade", x: P((x0 + x1 + 1) / 2), y: P((y0 + y1 + 1) / 2), doorId: id });
+    const m = mat ?? (matAt(x0, y1 + 1) || matAt(x1 + 1, y0) || Mat.HALL);
+    fill(x0, y0, x1, y1, Tile.FLOOR, m);
+    doors.push({ id, x: P((x0 + x1 + 1) / 2), y: P((y0 + y1 + 1) / 2), w: P(x1 - x0 + 1), h: P(y1 - y0 + 1), barricadable });
   };
   const glass = (x0: number, y0: number, x1: number, y1: number) => {
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) set(x, y, Tile.GLASS, matAt(x, y + 1) || Mat.CARPET);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) set(x, y, Tile.GLASS, matAt(x, y + 1) || matAt(x + 1, y) || Mat.HALL);
   };
   let furnCounter = 0;
   const place = (key: string, tx: number, ty: number, extra: Partial<FurnPlacement> = {}) => {
@@ -145,249 +151,261 @@ export function buildOffice(): OfficeMap {
   const station = (kind: StationKind, furnId: string | undefined, tx: number, ty: number, extra: Partial<StationDef> = {}) => {
     stations.push({ id: extra.id ?? `${kind}_${stations.length}`, kind, furnId, x: P(tx), y: P(ty), ...extra });
   };
-  const cooler = (tx: number, ty: number) => station("cooler", place("cooler", tx, ty), tx, ty);
-  const strip = (tx: number, ty: number) => station("powerstrip", place("powerstrip", tx, ty, { solid: false, shots: false }), tx, ty);
+  const home = (tx: number, ty: number, facing: number) => npcHomes.push({ x: P(tx), y: P(ty), facing });
+  // Water coolers and power strips are not part of the floor plan: they turn up somewhere new every day (Stations.randomizeProps).
   const plant = (tx: number, ty: number) => place("plant", tx, ty);
+  const copier = (id: string, tx: number, ty: number, main = false) => station("copier", place("copier", tx, ty, { id }), tx, ty, { id, main });
 
-  // ------------------------------------------------------------------ rooms
-  room("Executive Suite", 1, 1, 13, 9, Mat.WOOD);
-  room("Restrooms", 15, 1, 20, 9, Mat.RESTROOM);
-  room("Copy Room", 22, 1, 31, 9, Mat.CARPET_GREY);
-  room("Break Room", 33, 1, 45, 9, Mat.KITCHEN);
-  room("Open Office", 1, 11, 40, 29, Mat.CARPET);
-  room("Lobby", 42, 11, 54, 29, Mat.MARBLE);
-  room("Conference Room", 1, 31, 14, 40, Mat.WOOD);
-  room("HR Office", 16, 31, 24, 40, Mat.CARPET_BEIGE);
-  room("Server Room", 26, 31, 33, 40, Mat.SERVER);
-  room("Supply Closet", 35, 31, 40, 40, Mat.CONCRETE);
-  room("Mail Room", 42, 31, 54, 40, Mat.CONCRETE);
+  // ================================================================== shell
+  // North rooms ---------------------------------------------------------
+  room("Executive Suite", 1, 1, 13, 11, Mat.WOOD);
+  room("Boardroom", 15, 1, 28, 11, Mat.WOOD);
+  room("Cafeteria", 30, 1, 46, 11, Mat.KITCHEN);
+  room("Restrooms", 48, 1, 53, 11, Mat.RESTROOM);
+  room("Marketing Lounge", 55, 1, 62, 11, Mat.CARPET_TEAL);
+  for (const x of [14, 29, 47, 54]) fill(x, 1, x, 11, Tile.DRYWALL);
+  fill(1, 12, 62, 12, Tile.DRYWALL);
+  // Halls ---------------------------------------------------------------
+  room("North Hall", 1, 13, 62, 15, Mat.HALL);
+  room("South Hall", 1, 30, 62, 32, Mat.HALL);
+  room("West Hall", 21, 16, 23, 29, Mat.HALL);
+  room("East Hall", 40, 16, 42, 29, Mat.HALL);
+  // Wings ---------------------------------------------------------------
+  room("West Wing", 1, 16, 20, 29, Mat.CARPET);
+  room("East Wing", 43, 16, 62, 29, Mat.CARPET_TEAL);
+  // Server core: a concrete ring with one door and the elevator bank on its south face.
+  room("Server Core", 25, 17, 38, 28, Mat.SERVER);
+  // South rooms ---------------------------------------------------------
+  fill(1, 33, 62, 33, Tile.DRYWALL);
+  room("HR Department", 1, 34, 12, 44, Mat.CARPET_BEIGE);
+  room("Copy Center", 14, 34, 27, 44, Mat.CARPET_GREY);
+  room("Supply Closet", 29, 34, 34, 44, Mat.CONCRETE);
+  room("Mail Room", 36, 34, 45, 44, Mat.CONCRETE);
+  room("Lobby", 47, 34, 62, 44, Mat.MARBLE);
+  for (const x of [13, 28, 35, 46]) fill(x, 34, x, 44, Tile.DRYWALL);
+  // West fire stairs: a small walled room in the corner of the west wing.
+  fill(5, 24, 5, 29, Tile.DRYWALL);
+  fill(1, 24, 5, 24, Tile.DRYWALL);
+  fill(1, 25, 4, 29, Tile.FLOOR, Mat.STAIRS);
+  zones.push({ name: "West Stairs", x0: 1, y0: 25, x1: 4, y1: 29 });
+  fill(41, 40, 45, 44, Tile.FLOOR, Mat.STAIRS);
 
-  // West fire stairs: a little walled room carved out of the open office.
-  for (let y = 25; y <= 29; y++) set(5, y, Tile.WALL);
-  for (let x = 1; x <= 5; x++) set(x, 25, Tile.WALL);
-  for (let y = 26; y <= 29; y++) for (let x = 1; x <= 4; x++) set(x, y, Tile.FLOOR, Mat.STAIRS);
-  zones.push({ name: "Fire Stairs", x0: 1, y0: 26, x1: 4, y1: 29 });
-  for (let y = 36; y <= 40; y++) for (let x = 50; x <= 54; x++) set(x, y, Tile.FLOOR, Mat.STAIRS);
-
-  // Lobby glass wall with two wide openings into the open office.
-  for (let y = 11; y <= 29; y++) set(41, y, Tile.GLASS, Mat.MARBLE);
-  for (const y of [15, 16, 17, 23, 24, 25]) set(41, y, Tile.FLOOR, Mat.MARBLE);
-
-  // ------------------------------------------------------------------ doors / glass
-  glass(2, 10, 4, 10); glass(9, 10, 12, 10);
-  door("exec", 6, 10, 7, 10, true, Mat.WOOD);
-  door("restroom", 17, 10, 18, 10, false, Mat.RESTROOM);
-  glass(29, 10, 30, 10);
-  door("copy", 25, 10, 26, 10, true, Mat.CARPET_GREY);
-  glass(39, 10, 40, 10);
-  door("breakA", 35, 10, 36, 10, true, Mat.KITCHEN);
-  door("breakB", 42, 10, 43, 10, true, Mat.KITCHEN);
+  // ================================================================== doors / glass
+  glass(2, 12, 5, 12); glass(10, 12, 12, 12);
+  door("exec", 7, 12, 8, 12, true, Mat.WOOD);
+  glass(16, 12, 19, 12); glass(24, 12, 27, 12);
+  door("board", 21, 12, 22, 12, true, Mat.WOOD);
+  door("cafeA", 33, 12, 34, 12, true, Mat.KITCHEN);
+  door("cafeB", 42, 12, 43, 12, true, Mat.KITCHEN);
+  door("restroom", 50, 12, 51, 12, false, Mat.RESTROOM);
+  door("lounge", 58, 12, 59, 12, true, Mat.CARPET_TEAL);
+  door("core", 31, 16, 32, 16, true, Mat.SERVER);
   door("stairsW", 5, 27, 5, 28, true, Mat.STAIRS);
+  glass(2, 33, 4, 33); glass(9, 33, 11, 33);
+  door("hr", 6, 33, 7, 33, true, Mat.CARPET_BEIGE);
+  door("copy", 20, 33, 21, 33, true, Mat.CARPET_GREY);
+  door("supply", 31, 33, 32, 33, true, Mat.CONCRETE);
+  door("mail", 39, 33, 41, 33, false, Mat.CONCRETE);
+  door("lobby", 50, 33, 53, 33, false, Mat.MARBLE);
+  glass(46, 36, 46, 38);
 
-  glass(2, 30, 5, 30); glass(8, 30, 10, 30);
-  door("conf", 12, 30, 13, 30, true, Mat.WOOD);
-  glass(22, 30, 23, 30);
-  door("hr", 19, 30, 20, 30, true, Mat.CARPET_BEIGE);
-  door("server", 28, 30, 29, 30, true, Mat.SERVER);
-  door("supply", 37, 30, 38, 30, true, Mat.CONCRETE);
-  door("mail", 46, 30, 48, 30, false, Mat.CONCRETE);
-
-  // ------------------------------------------------------------------ spawns
-  for (const [i, tx] of [47, 50, 53].entries()) {
-    set(tx, 10, Tile.ELEVATOR); set(tx + 1, 10, Tile.ELEVATOR);
-    spawns.push({ id: `elevator${i}`, kind: "elevator", x: P(tx + 1), y: P(11.6), doorTx: tx, doorTy: 10 });
+  // ================================================================== spawns
+  for (const [i, tx] of [27, 31, 35].entries()) {
+    set(tx, 29, Tile.ELEVATOR); set(tx + 1, 29, Tile.ELEVATOR);
+    spawns.push({ id: `elevator${i}`, kind: "elevator", x: P(tx + 1), y: P(30.6), doorTx: tx, doorTy: 29 });
   }
-  set(41, 0, Tile.EXIT_DOOR); set(42, 0, Tile.EXIT_DOOR);
-  spawns.push({ id: "fireexit", kind: "exit", x: P(42), y: P(1.6), doorTx: 41, doorTy: 0 });
-  spawns.push({ id: "stairsW", kind: "stairs", x: P(2.6), y: P(27.8) });
-  spawns.push({ id: "stairsSE1", kind: "stairs", x: P(52.5), y: P(37.5) });
-  spawns.push({ id: "stairsSE2", kind: "stairs", x: P(52.5), y: P(39.4) });
+  set(39, 0, Tile.EXIT_DOOR); set(40, 0, Tile.EXIT_DOOR);
+  spawns.push({ id: "fireexitN", kind: "exit", x: P(40), y: P(1.6), doorTx: 39, doorTy: 0 });
+  set(59, 0, Tile.EXIT_DOOR); set(60, 0, Tile.EXIT_DOOR);
+  spawns.push({ id: "fireexitNE", kind: "exit", x: P(60), y: P(1.6), doorTx: 59, doorTy: 0 });
+  set(58, 33, Tile.EXIT_DOOR); set(59, 33, Tile.EXIT_DOOR);
+  spawns.push({ id: "lobbyStairs", kind: "exit", x: P(59), y: P(34.6), doorTx: 58, doorTy: 33 });
+  spawns.push({ id: "stairsW", kind: "stairs", x: P(2.6), y: P(27.2) });
+  spawns.push({ id: "stairsSE1", kind: "stairs", x: P(43.5), y: P(41.6) });
+  spawns.push({ id: "stairsSE2", kind: "stairs", x: P(43.5), y: P(43.6) });
 
-  // ------------------------------------------------------------------ executive suite
-  const execDesk = place("exec_desk", 7.0, 3.0);
-  place("chair_exec_180", 6.35, 3.55, { solid: false });
-  station("emails", execDesk, 7.0, 3.0, { id: "emails" });
-  place("bookcase", 3.0, 1.4);
-  place("bookcase", 11.0, 1.4);
-  place("rug_exec", 7.0, 6.6, { floor: true, solid: false, shots: false });
-  place("sofa_exec_90", 1.6, 6.6);
-  place("coffee_table", 3.4, 6.6);
-  const ceoPlant = plant(12.4, 1.6);
-  station("plant", ceoPlant, 12.4, 1.6, { id: "ceo_plant" });
-  plant(1.6, 8.5); plant(12.4, 8.5);
-  place("coatrack", 10.2, 8.6);
+  // ================================================================== Executive Suite
+  const execDesk = place("exec_desk", 7.0, 3.2);
+  place("chair_exec_180", 6.35, 3.75, { solid: false });
+  station("emails", execDesk, 7.0, 3.2, { id: "emails" });
+  place("bookcase", 3.0, 1.4); place("bookcase", 11.0, 1.4);
+  place("rug_exec", 7.0, 7.2, { floor: true, solid: false, shots: false });
+  place("sofa_exec_90", 1.6, 7.2);
+  place("coffee_table", 3.4, 7.2);
+  station("plant", plant(12.4, 1.6), 12.4, 1.6, { id: "ceo_plant" });
+  plant(1.6, 10.4); plant(12.4, 10.4);
+  place("coatrack", 10.2, 10.5);
   place("lamp", 1.5, 1.5);
-  cooler(12.4, 4.4);
-  strip(8.9, 4.7);
 
-  // ------------------------------------------------------------------ restrooms
-  const toilet = place("toilet_180", 15.9, 1.7);
-  station("toilet", toilet, 15.9, 1.7, { id: "toilet" });
-  place("toilet_180", 17.7, 1.7);
-  place("partition", 16.85, 2.0, { w: 10, h: 120 });
-  place("sink", 19.4, 1.5);
-  place("sink", 20.4, 1.5);
-  place("trash", 15.6, 8.6);
-  plant(20.4, 8.5);
+  // ================================================================== Boardroom
+  place("conf_table", 21.5, 6.2);
+  for (const tx of [19.6, 21.5, 23.4]) {
+    place("chair_conf_0", tx, 4.65, { solid: false });
+    place("chair_conf_180", tx, 7.8, { solid: false });
+  }
+  place("chair_conf_90", 18.3, 6.2, { solid: false });
+  place("chair_conf_270", 24.7, 6.2, { solid: false });
+  home(19.6, 4.6, DOWN); home(23.4, 7.85, UP); home(24.75, 6.2, LEFT);
+  station("presentation", place("tv", 21.5, 1.35), 21.5, 1.35, { id: "presentation" });
+  place("whiteboard", 16.9, 1.25);
+  place("whiteboard", 26.2, 1.25);
+  plant(15.5, 10.5); plant(28.4, 10.5); plant(28.4, 1.6);
 
-  // ------------------------------------------------------------------ copy room
-  const copierMain = place("copier", 24.0, 2.0, { id: "copier_main" });
-  station("copier", copierMain, 24.0, 2.0, { id: "copier_main", main: true });
-  const copier2 = place("copier", 27.0, 2.0, { id: "copier_2" });
-  station("copier", copier2, 27.0, 2.0, { id: "copier_2" });
-  const shredder = place("shredder", 29.2, 1.7);
-  station("shred", shredder, 29.2, 1.7, { id: "shredder" });
-  const supplyA = place("supply_shelf", 31.0, 2.1);
-  station("supply", supplyA, 31.0, 2.1, { id: "supply_copy" });
-  place("filing", 22.7, 5.4); place("filing", 22.7, 6.5);
-  place("box", 30.9, 8.6); place("box", 30.4, 8.7); place("box", 30.7, 8.2, { solid: false });
-  place("trash", 23.0, 8.6);
-  strip(25.2, 3.6);
-
-  // ------------------------------------------------------------------ break room
-  place("counter_sink", 33.6, 1.55);
-  const coffee = place("coffee_station", 34.65, 1.55, { id: "coffee_station" });
-  station("coffee", coffee, 34.65, 1.55, { id: "coffee" });
-  place("counter_microwave", 35.7, 1.55);
-  place("counter", 36.75, 1.55);
-  const fridge = place("fridge", 38.1, 1.55);
-  station("fridge", fridge, 38.1, 1.55, { id: "fridge" });
-  const vend1 = place("vending", 33.8, 5.0);
-  station("vending", vend1, 33.8, 5.0, { id: "vending_1" });
-  const vend2 = place("vending_b", 33.8, 6.5);
-  station("vending", vend2, 33.8, 6.5, { id: "vending_2" });
-  const arcade = place("arcade", 45.2, 4.6);
-  station("arcade", arcade, 45.2, 4.6, { id: "arcade" });
-  place("claw", 45.1, 6.4);
-  for (const [tx, ty] of [[38.0, 5.0], [41.6, 5.0]] as const) {
+  // ================================================================== Cafeteria
+  place("counter_sink", 30.6, 1.55);
+  station("coffee", place("coffee_station", 31.65, 1.55, { id: "coffee_station" }), 31.65, 1.55, { id: "coffee" });
+  place("counter_microwave", 32.7, 1.55);
+  place("counter", 33.75, 1.55);
+  station("fridge", place("fridge", 35.2, 1.55), 35.2, 1.55, { id: "fridge" });
+  station("vending", place("vending", 30.9, 5.6), 30.9, 5.6, { id: "vending_1" });
+  station("vending", place("vending_b", 30.9, 7.2), 30.9, 7.2, { id: "vending_2" });
+  for (const [tx, ty] of [[35.5, 6.0], [39.5, 6.0], [43.5, 6.0]] as const) {
     place("break_table", tx, ty);
     place("stool", tx - 1.05, ty, { solid: false });
     place("stool", tx + 1.05, ty, { solid: false });
     place("stool", tx, ty + 1.15, { solid: false });
+    home(tx - 1.05, ty, RIGHT);
   }
-  place("sofa_break_180", 39.0, 8.55);
-  cooler(44.6, 1.6);
-  plant(45.3, 8.6);
-  place("trash", 33.6, 8.6);
-  strip(37.4, 2.9);
+  place("sofa_break_180", 39.5, 10.55);
+  plant(46.3, 10.5); plant(30.6, 10.5);
+  place("trash", 36.8, 1.7);
 
-  // ------------------------------------------------------------------ open office pods
+  // ================================================================== Restrooms
+  station("toilet", place("toilet_180", 48.9, 1.7), 48.9, 1.7, { id: "toilet" });
+  place("toilet_180", 50.7, 1.7);
+  place("partition", 49.85, 2.0, { w: 10, h: 120 });
+  place("sink", 52.4, 1.5); place("sink", 53.4, 1.5);
+  place("trash", 48.6, 10.6);
+  plant(53.4, 10.5);
+
+  // ================================================================== Marketing Lounge
+  place("rug_round", 58.6, 6.4, { floor: true, solid: false, shots: false });
+  station("arcade", place("arcade", 61.6, 3.4), 61.6, 3.4, { id: "arcade" });
+  place("claw", 61.5, 5.6);
+  place("sofa_lobby_180", 58.4, 9.4);
+  place("armchair_lobby_90", 55.9, 6.4);
+  place("coffee_table", 58.4, 6.6);
+  place("whiteboard", 57.4, 1.25);
+  home(58.0, 8.55, UP); home(56.9, 6.4, RIGHT);
+  plant(62.4, 10.5); plant(55.6, 10.5);
+
+  // ================================================================== open-plan wings
   const pod = (px: number, py: number) => {
     const variants = ["ws_a", "ws_b", "ws_c"];
     for (let i = 0; i < 3; i++) {
       const cx = px + 0.95 + i * 1.8;
-      place(`${variants[(i + px) % 3]}_180`, cx, py + 1.25);
-      place(`${variants[(i + px + 1) % 3]}_0`, cx, py + 2.35);
+      place(`${variants[(i + Math.floor(px)) % 3]}_180`, cx, py + 1.25);
+      place(`${variants[(i + Math.floor(px) + 1) % 3]}_0`, cx, py + 2.35);
       place("chair_office_0", cx, py + 0.38, { solid: false });
       place("chair_office_180", cx, py + 3.25, { solid: false });
-      npcHomes.push({ x: P(cx), y: P(py + 0.3), facing: Math.PI / 2 });
-      npcHomes.push({ x: P(cx), y: P(py + 3.32), facing: -Math.PI / 2 });
+      home(cx, py + 0.3, DOWN);
+      home(cx, py + 3.32, UP);
     }
     place("partition", px + 2.75, py + 1.8, { w: P(5.5), h: 12 });
     place("trash", px + 5.85, py + 0.45);
     plant(px - 0.35, py + 3.1);
   };
-  for (const px of [3, 11, 19, 27]) pod(px, 12);
-  for (const px of [8, 16, 24]) pod(px, 23);
+  // West wing
+  pod(2, 16.6); pod(8.5, 16.6); pod(15, 16.6);
+  pod(8.5, 21.4); pod(15, 21.4);
+  copier("copier_west", 2.4, 22.0);
+  plant(20.4, 29.4); plant(6.6, 29.4);
+  place("break_table", 11.5, 27.6);
+  place("stool", 10.45, 27.6, { solid: false });
+  place("stool", 12.55, 27.6, { solid: false });
+  // East wing
+  pod(44, 16.6); pod(50.5, 16.6); pod(57, 16.6);
+  pod(44, 21.4); pod(50.5, 21.4);
+  place("whiteboard", 59.8, 21.25);
+  place("break_table", 59.8, 23.6);
+  place("stool", 58.75, 23.6, { solid: false });
+  place("stool", 60.85, 23.6, { solid: false });
+  home(58.75, 23.6, RIGHT);
+  copier("copier_east", 61.6, 27.6);
+  plant(43.6, 29.4); plant(62.4, 21.6);
+  // Halls: a little dressing so they're not empty runways
+  for (const tx of [9.5, 26.5, 37.5, 52.5]) plant(tx, 13.4);
+  for (const tx of [9.5, 26.5, 56.5]) plant(tx, 32.5);
 
-  // Collaboration corner (north) and kitchenette corner (south) of the open office.
-  place("whiteboard", 37.6, 11.25);
-  place("break_table", 37.6, 13.6);
-  place("stool", 36.5, 13.6, { solid: false });
-  place("stool", 38.7, 13.6, { solid: false });
-  place("stool", 37.6, 14.8, { solid: false });
-  cooler(34.6, 11.7);
-  plant(40.4, 11.6);
-  const copier3 = place("copier", 35.6, 26.0, { id: "copier_3" });
-  station("copier", copier3, 35.6, 26.0, { id: "copier_3" });
-  place("break_table", 38.6, 25.4);
-  place("stool", 37.55, 25.4, { solid: false });
-  place("stool", 39.65, 25.4, { solid: false });
-  cooler(39.6, 28.4);
-  plant(32.4, 28.5);
-  cooler(1.7, 17.2);
-  cooler(20.6, 21.7);
-  for (const [tx, ty] of [[7.0, 17.2], [15.0, 21.8], [23.0, 17.2], [31.0, 21.8]] as const) strip(tx, ty);
-  plant(10.2, 19.6); plant(26.6, 20.6); plant(1.5, 11.6); plant(40.4, 22.0);
+  // ================================================================== Server Core
+  for (const ty of [18.8, 22.0]) for (const tx of [27.0, 29.3, 34.7, 37.0]) place("server", tx, ty);
+  station("server", place("server_console", 32.0, 27.4), 32.0, 27.4, { id: "server" });
+  place("generator", 26.6, 26.7);
+  place("antenna", 37.3, 26.8);
 
-  // ------------------------------------------------------------------ lobby
-  place("reception", 48.5, 20.0);
-  place("chair_office_0", 48.5, 19.2, { solid: false });
-  npcHomes.push({ x: P(48.5), y: P(19.15), facing: Math.PI / 2 });
-  place("rug_lobby", 48.5, 25.6, { floor: true, solid: false, shots: false });
-  place("sofa_lobby_0", 48.5, 23.7);
-  place("sofa_lobby_180", 48.5, 27.6);
-  place("armchair_lobby_90", 45.7, 25.6);
-  place("armchair_lobby_270", 51.3, 25.6);
-  place("coffee_table", 48.5, 25.6);
-  plant(42.6, 11.7); plant(54.3, 11.7); plant(42.6, 28.4); plant(54.3, 28.4);
-  cooler(54.2, 15.6);
-  const vend3 = place("vending_b", 54.15, 20.6);
-  station("vending", vend3, 54.15, 20.6, { id: "vending_3" });
-  strip(45.0, 18.6);
+  // ================================================================== HR Department
+  station("memos", place("ws_hr", 6.5, 37.2), 6.5, 37.2, { id: "memos" });
+  place("chair_office_180", 6.5, 38.3, { solid: false });
+  home(6.5, 38.35, UP);
+  for (const tx of [1.6, 2.6, 10.4, 11.4]) place("filing", tx, 34.45);
+  place("ws_hr", 3.6, 41.0);
+  place("chair_office_180", 3.6, 42.1, { solid: false });
+  home(3.6, 42.15, UP);
+  place("ws_hr", 9.4, 41.0);
+  place("chair_office_180", 9.4, 42.1, { solid: false });
+  home(9.4, 42.15, UP);
+  station("shred", place("shredder", 11.6, 43.6), 11.6, 43.6, { id: "shredder_hr" });
+  plant(1.5, 43.5);
+  place("chair_conf_0", 1.8, 38.2, { solid: false });
+  place("chair_conf_0", 2.7, 38.2, { solid: false });
 
-  // ------------------------------------------------------------------ conference room
-  place("conf_table", 7.5, 35.5);
-  for (const tx of [5.6, 7.5, 9.4]) {
-    place("chair_conf_0", tx, 33.95, { solid: false });
-    place("chair_conf_180", tx, 37.1, { solid: false });
-  }
-  place("chair_conf_90", 4.3, 35.5, { solid: false });
-  place("chair_conf_270", 10.7, 35.5, { solid: false });
-  const tv = place("tv", 7.5, 31.35);
-  station("presentation", tv, 7.5, 31.35, { id: "presentation" });
-  place("whiteboard", 2.9, 31.25);
-  plant(1.5, 39.5); plant(14.4, 39.5); plant(14.4, 31.6);
-  strip(8.0, 39.1);
+  // ================================================================== Copy Center
+  copier("copier_main", 16.0, 35.0, true);
+  copier("copier_2", 18.8, 35.0);
+  station("shred", place("shredder", 22.6, 34.7), 22.6, 34.7, { id: "shredder" });
+  station("supply", place("supply_shelf", 26.0, 35.1), 26.0, 35.1, { id: "supply_copy" });
+  place("filing", 14.6, 38.4); place("filing", 14.6, 39.5);
+  place("ws_c_0", 20.8, 39.8);
+  home(19.6, 40.9, UP); home(22.0, 40.9, UP);
+  for (const [tx, ty] of [[26.9, 43.6], [26.4, 43.7], [26.7, 43.2]] as const) place("box", tx, ty, ty === 43.2 ? { solid: false } : {});
+  place("trash", 15.0, 43.6);
 
-  // ------------------------------------------------------------------ HR
-  const hrDesk = place("ws_hr", 18.6, 33.6);
-  station("memos", hrDesk, 18.6, 33.6, { id: "memos" });
-  place("chair_office_180", 18.6, 34.65, { solid: false });
-  place("filing", 21.3, 31.45); place("filing", 22.3, 31.45); place("filing", 23.3, 31.45);
-  place("ws_hr", 21.8, 37.0);
-  place("chair_office_180", 21.8, 38.05, { solid: false });
-  const shred2 = place("shredder", 16.7, 39.4);
-  station("shred", shred2, 16.7, 39.4, { id: "shredder_hr" });
-  plant(24.4, 39.4);
-  cooler(24.3, 34.4);
-  place("chair_conf_0", 16.9, 36.6, { solid: false });
-  place("chair_conf_0", 17.8, 36.6, { solid: false });
-  strip(20.4, 35.9);
-
-  // ------------------------------------------------------------------ server room
-  for (const ty of [32.4, 35.7]) for (const tx of [27.3, 29.6, 31.9]) place("server", tx, ty);
-  const console = place("server_console", 29.6, 38.7);
-  station("server", console, 29.6, 38.7, { id: "server" });
-  place("generator", 32.6, 38.8);
-  place("antenna", 27.0, 38.9);
-  strip(28.5, 34.15);
-  strip(31.0, 37.35);
-
-  // ------------------------------------------------------------------ supply closet
-  for (const [tx, ty] of [[36.1, 32.0], [38.7, 32.0], [36.1, 36.4], [38.7, 36.4]] as const) {
+  // ================================================================== Supply Closet
+  for (const [tx, ty] of [[30.1, 35.0], [33.7, 35.0], [30.1, 39.6], [33.7, 39.6]] as const) {
     const s = place("supply_shelf", tx, ty);
-    if (tx === 36.1 && ty === 32.0) station("supply", s, tx, ty, { id: "supply_closet" });
+    if (tx === 30.1 && ty === 35.0) station("supply", s, tx, ty, { id: "supply_closet" });
   }
-  place("box", 40.3, 39.4); place("box", 39.7, 39.6); place("box", 35.5, 39.5);
+  place("box", 34.4, 43.4); place("box", 33.8, 43.6); place("box", 29.6, 43.5);
 
-  // ------------------------------------------------------------------ mail room / stairs
-  place("supply_shelf", 43.5, 32.0);
-  place("box", 45.0, 31.7); place("box", 45.5, 32.1);
-  const copier4 = place("copier", 44.0, 35.2, { id: "copier_4" });
-  station("copier", copier4, 44.0, 35.2, { id: "copier_4" });
-  cooler(43.0, 39.3);
-  plant(49.3, 39.5); place("trash", 42.6, 37.6);
+  // ================================================================== Mail Room
+  place("supply_shelf", 37.1, 35.1);
+  place("box", 44.6, 34.8); place("box", 45.1, 35.2);
+  copier("copier_mail", 37.0, 39.4);
+  place("trash", 36.6, 43.6);
+  plant(45.4, 34.6);
 
-  // ------------------------------------------------------------------ misc
-  const playerSpawn = { x: P(7.0), y: P(6.9) };
+  // ================================================================== Lobby
+  place("reception", 54.5, 38.6);
+  place("chair_office_0", 54.5, 37.8, { solid: false });
+  home(54.5, 37.75, DOWN);
+  place("rug_lobby", 54.5, 42.2, { floor: true, solid: false, shots: false });
+  place("sofa_lobby_180", 54.5, 44.1);
+  place("armchair_lobby_90", 51.7, 42.2);
+  place("armchair_lobby_270", 57.3, 42.2);
+  place("coffee_table", 54.5, 42.2);
+  home(51.7, 42.2, RIGHT);
+  plant(47.6, 34.6); plant(62.4, 34.6); plant(47.6, 44.4); plant(62.4, 44.4);
+  station("vending", place("vending_b", 61.6, 40.6), 61.6, 40.6, { id: "vending_3" });
+
+  // ================================================================== misc
+  const zoneGrid = new Int16Array(W * H).fill(-1);
+  zones.forEach((z, zi) => {
+    for (let y = z.y0; y <= z.y1; y++) for (let x = z.x0; x <= z.x1; x++) {
+      if (tiles[y * W + x] === Tile.FLOOR) zoneGrid[y * W + x] = zi;
+    }
+  });
+  // Doorway tiles belong to the room they open into.
+  for (const d of doors) {
+    const tx = Math.floor(d.x / TILE), ty = Math.floor(d.y / TILE);
+    const below = zoneGrid[(ty + 1) * W + tx];
+    if (below >= 0) zoneGrid[ty * W + tx] = below;
+  }
+  const playerSpawn = { x: P(7.0), y: P(7.6) };
   for (const z of zones) {
-    if (z.name === "Fire Stairs") continue;
+    if (z.name.includes("Stairs") || z.name.includes("Hall")) continue;
     wanderSpots.push({ x: P((z.x0 + z.x1 + 1) / 2), y: P((z.y0 + z.y1 + 1) / 2) });
   }
-  wanderSpots.push({ x: P(20.5), y: P(19.5) }, { x: P(9), y: P(20) }, { x: P(32), y: P(19) });
-
-  return { w: W, h: H, tiles, mats, furniture, stations, doors, spawns, npcHomes, zones, playerSpawn, wanderSpots };
+  return { w: W, h: H, tiles, mats, zoneGrid, furniture, stations, doors, spawns, npcHomes, zones, playerSpawn, wanderSpots };
 }
 
 export function tileAt(map: OfficeMap, tx: number, ty: number): Tile {

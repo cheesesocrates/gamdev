@@ -36,10 +36,12 @@ export const FLOOR_INDEX: Record<number, number[]> = {
   7: [15],
   8: [16, 17],
   9: [18],
-  10: [19]
+  10: [19],
+  11: [20, 33], // hall terrazzo
+  12: [34, 35] // teal carpet
 };
-export const WALL_INDEX = { CAP: 21, FACE: 22, WINDOW: 23, FACE_ALT: 24, ELEV_L: 25, ELEV_R: 26, EXIT_L: 27, EXIT_R: 28, GLASS: 29, GLASS_FACE: 30 };
-const TILESET_COUNT = 32;
+export const WALL_INDEX = { CAP: 21, FACE: 22, WINDOW: 23, FACE_ALT: 24, ELEV_L: 25, ELEV_R: 26, EXIT_L: 27, EXIT_R: 28, GLASS: 29, GLASS_FACE: 30, DRY_CAP: 31, DRY_FACE: 32 };
+const TILESET_COUNT = 36;
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -313,6 +315,49 @@ function makeTileset(scene: Phaser.Scene) {
       ctx.fillStyle = "#59616e";
       ctx.fillRect(x, 0, 3, T); ctx.fillRect(x + T - 3, 0, 3, T);
     }
+
+    // ------------------------------------------------ hall terrazzo (colourful chips)
+    const terrazzo = (i: number, seed: number) => {
+      const x = at(i);
+      ctx.fillStyle = seed ? "#d3d6de" : "#cfd3dc";
+      ctx.fillRect(x, 0, T, T);
+      const chips = ["#d9a28e", "#7cc7ff", "#ffd36b", "#9be59b", "#b7a6ff", "#8a8f9c", "#ffffff"];
+      for (let k = 0; k < 70; k++) {
+        ctx.fillStyle = chips[(k * 7 + seed * 3) % chips.length];
+        const s = 1.5 + Math.random() * 2.5;
+        ctx.globalAlpha = 0.55 + Math.random() * 0.35;
+        ctx.fillRect(x + Math.random() * (T - s), Math.random() * (T - s), s, s * (0.6 + Math.random() * 0.8));
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "rgba(255,255,255,0.45)";
+      ctx.fillRect(x, 0, T, 1); ctx.fillRect(x, 0, 1, T);
+      ctx.fillStyle = "rgba(0,0,0,0.08)";
+      ctx.fillRect(x, T - 1, T, 1); ctx.fillRect(x + T - 1, 0, 1, T);
+    };
+    terrazzo(20, 0); terrazzo(33, 1);
+    carpet(34, 0x2c6f78, 0); carpet(35, 0x2a6a73, 1);
+
+    // ------------------------------------------------ drywall: warm paint + panel seams
+    {
+      const x = at(31);
+      ctx.fillStyle = "#2b2733"; ctx.fillRect(x, 0, T, T);
+      ctx.fillStyle = "#3b3545"; ctx.fillRect(x + 3, 3, T - 6, T - 6);
+      ctx.fillStyle = "#2b2733"; ctx.fillRect(x + 6, 6, T - 12, T - 12);
+      ctx.fillStyle = "rgba(255,210,150,0.10)"; ctx.fillRect(x + 31, 3, 2, T - 6);
+    }
+    {
+      const x = at(32);
+      ctx.fillStyle = "#2b2733"; ctx.fillRect(x, 0, T, 16);
+      ctx.fillStyle = "#3b3545"; ctx.fillRect(x, 0, T, 3);
+      const g = ctx.createLinearGradient(0, 16, 0, T);
+      g.addColorStop(0, "#efe3cf"); g.addColorStop(1, "#d6c7ad");
+      ctx.fillStyle = g; ctx.fillRect(x, 16, T, T - 16);
+      ctx.fillStyle = "rgba(120,95,60,0.22)";
+      ctx.fillRect(x + 31, 16, 2, T - 23);
+      ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.fillRect(x, 16, T, 2);
+      ctx.fillStyle = "#7a5a3c"; ctx.fillRect(x, T - 7, T, 7);
+      ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(x, T - 7, T, 1);
+    }
   });
   const tex = scene.textures.get("tileset");
   for (let i = 0; i < TILESET_COUNT; i++) tex.add(i, 0, i * TILE, 0, TILE, TILE);
@@ -361,7 +406,7 @@ function makeTextures(scene: Phaser.Scene) {
     ctx.fillStyle = "#9ee6a8"; ctx.fillRect(3, 3, 12, 5);
     ctx.fillStyle = "#d9dde3";
     for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) ctx.fillRect(3 + c * 4, 10 + r * 3.6, 3, 2.4);
-    ctx.fillStyle = "#ff8a3d"; ctx.fillRect(13, 17, 3, 3);
+    ctx.fillStyle = "#c97a3a"; ctx.fillRect(13, 17, 3, 3);
   });
   canvasTexture(scene, "p_memo", 18, 14, (ctx) => {
     ctx.fillStyle = "#9a9384"; ctx.fillRect(0, 0, 18, 14);
@@ -450,6 +495,78 @@ function makeTextures(scene: Phaser.Scene) {
     }
   });
 
+  // Water layer stamps (tinted per pass when painting puddles).
+  canvasTexture(scene, "w_disc", 64, 64, (ctx) => {
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(32, 32, 31, 0, Math.PI * 2); ctx.fill();
+  });
+  canvasTexture(scene, "w_px", 8, 8, (ctx) => { ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, 8, 8); });
+  canvasTexture(scene, "w_shine", 48, 48, (ctx) => {
+    ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 3; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(18, 18, 13, 3.5, 4.6); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.beginPath(); ctx.arc(33, 32, 2.2, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // Office Romance heart left on the floor
+  canvasTexture(scene, "p_heart", 40, 36, (ctx) => {
+    ctx.fillStyle = "rgba(255,111,181,0.25)";
+    ctx.beginPath(); ctx.ellipse(20, 30, 16, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#cf6a4c"; ctx.strokeStyle = "#1c1d21"; ctx.lineWidth = 3; ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(20, 31); ctx.bezierCurveTo(6, 22, 3, 15, 3, 10); ctx.bezierCurveTo(3, 5, 7, 2, 11, 2);
+    ctx.bezierCurveTo(15, 2, 18, 4, 20, 7); ctx.bezierCurveTo(22, 4, 25, 2, 29, 2); ctx.bezierCurveTo(33, 2, 37, 5, 37, 10);
+    ctx.bezierCurveTo(37, 15, 34, 22, 20, 31); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.beginPath(); ctx.ellipse(11, 9, 3, 2, -0.6, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // ---- new weapon projectiles (drawn facing right)
+  canvasTexture(scene, "p_plane", 30, 22, (ctx) => {
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#1c1d21"; ctx.lineWidth = 2.5;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.moveTo(28, 11); ctx.lineTo(2, 2); ctx.lineTo(9, 11); ctx.lineTo(2, 20); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#dce6ea";
+    ctx.beginPath(); ctx.moveTo(28, 11); ctx.lineTo(9, 11); ctx.lineTo(4, 16); ctx.closePath(); ctx.fill(); ctx.stroke();
+  });
+  canvasTexture(scene, "p_confetti", 9, 7, (ctx) => {
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, 9, 7);
+    ctx.fillStyle = "rgba(27,15,59,0.35)"; ctx.fillRect(0, 5, 9, 2);
+  });
+  canvasTexture(scene, "p_drop", 14, 12, (ctx) => {
+    ctx.fillStyle = "#6aa3b4"; ctx.strokeStyle = "#1b4f8a"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(13, 6); ctx.quadraticCurveTo(6, 0, 2, 3); ctx.quadraticCurveTo(-1, 6, 2, 9); ctx.quadraticCurveTo(6, 12, 13, 6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.fillRect(4, 4, 3, 2);
+  });
+  canvasTexture(scene, "p_slip", 24, 16, (ctx) => {
+    ctx.fillStyle = "#cf6a4c"; ctx.strokeStyle = "#1c1d21"; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.roundRect(1.5, 1.5, 21, 13, 2); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(5, 6); ctx.lineTo(18, 6); ctx.moveTo(5, 10); ctx.lineTo(14, 10); ctx.stroke();
+  });
+  canvasTexture(scene, "p_toner", 30, 18, (ctx) => {
+    ctx.fillStyle = "#2a2c33"; ctx.strokeStyle = "#1c1d21"; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.roundRect(1.5, 1.5, 27, 15, 4); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#5b6380"; ctx.fillRect(7, 5, 13, 8);
+    ctx.fillStyle = "#c97a3a"; ctx.beginPath(); ctx.arc(26, 4, 3, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // smashed drywall: plaster dust with broken panel chunks
+  canvasTexture(scene, "rubble", 80, 80, (ctx) => {
+    const dust = ctx.createRadialGradient(40, 40, 4, 40, 40, 38);
+    dust.addColorStop(0, "rgba(236,226,206,0.75)"); dust.addColorStop(1, "rgba(236,226,206,0)");
+    ctx.fillStyle = dust; ctx.fillRect(0, 0, 80, 80);
+    for (let i = 0; i < 16; i++) {
+      const x = 10 + Math.random() * 60, y = 10 + Math.random() * 60, s = 4 + Math.random() * 9;
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(Math.random() * Math.PI);
+      ctx.fillStyle = i % 4 === 0 ? "#7a5a3c" : i % 3 === 0 ? "#d6c7ad" : "#efe3cf";
+      ctx.beginPath(); ctx.moveTo(-s, -s * 0.5); ctx.lineTo(s * 0.8, -s * 0.7); ctx.lineTo(s, s * 0.4); ctx.lineTo(-s * 0.4, s * 0.8); ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "rgba(60,40,30,0.45)"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.restore();
+    }
+  });
+
   // HR riot shield (cubicle divider), seen from above
   canvasTexture(scene, "shield", 16, 56, (ctx) => {
     ctx.fillStyle = "#2c323c"; ctx.fillRect(0, 0, 16, 56);
@@ -481,6 +598,20 @@ function makeTextures(scene: Phaser.Scene) {
   canvasTexture(scene, "elev_dark", 54, 42, (ctx) => {
     ctx.fillStyle = "#0b0d11"; ctx.fillRect(0, 0, 54, 42);
     ctx.fillStyle = "rgba(255,200,120,0.25)"; ctx.fillRect(4, 30, 46, 12);
+  });
+
+  // Office Drone: little quadcopter with a red status light.
+  canvasTexture(scene, "drone", 40, 40, (ctx) => {
+    ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.beginPath(); ctx.ellipse(20, 30, 14, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#1c1d21"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(8, 8); ctx.lineTo(32, 32); ctx.moveTo(32, 8); ctx.lineTo(8, 32); ctx.stroke();
+    for (const [x, y] of [[8, 8], [32, 8], [8, 32], [32, 32]]) {
+      ctx.fillStyle = "rgba(200,230,255,0.55)"; ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#1c1d21"; ctx.lineWidth = 2; ctx.stroke();
+    }
+    ctx.fillStyle = "#e9c25a"; ctx.strokeStyle = "#1c1d21"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.roundRect(11, 13, 18, 14, 4); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#ff3355"; ctx.beginPath(); ctx.arc(20, 20, 3, 0, Math.PI * 2); ctx.fill();
   });
 
   canvasTexture(scene, "spark_line", 32, 4, (ctx) => {

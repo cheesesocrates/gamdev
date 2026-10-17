@@ -60,6 +60,8 @@ export class World {
   h: number;
   tiles: Uint8Array;
   glassHp: Map<number, number> = new Map();
+  /** Drywall hit points (interior walls only; concrete never breaks). */
+  wallHp: Map<number, number> = new Map();
 
   private colliders: Collider[] = [];
   private hash: Map<number, Collider[]> = new Map();
@@ -92,6 +94,21 @@ export class World {
   }
   isFloorAt(x: number, y: number): boolean {
     return !this.tileSolid(Math.floor(x / TILE), Math.floor(y / TILE));
+  }
+
+  /** Damages a drywall tile; returns true when it breaks into floor. */
+  damageWall(tx: number, ty: number, amount = 1): boolean {
+    const i = ty * this.w + tx;
+    if (this.tiles[i] !== Tile.DRYWALL) return false;
+    const hp = (this.wallHp.get(i) ?? 8) - amount;
+    if (hp > 0) {
+      this.wallHp.set(i, hp);
+      return false;
+    }
+    this.wallHp.delete(i);
+    this.tiles[i] = Tile.FLOOR;
+    this.rebuildNav();
+    return true;
   }
 
   /** Returns true once the pane breaks. */
@@ -128,12 +145,42 @@ export class World {
 
   removeCollider(col: Collider) {
     col.alive = false;
+    const k = this.colliders.indexOf(col);
+    if (k >= 0) this.colliders.splice(k, 1);
     this.forCells(col.x0, col.y0, col.x1, col.y1, (key) => {
       const list = this.hash.get(key);
       if (!list) return;
       const i = list.indexOf(col);
       if (i >= 0) list.splice(i, 1);
     });
+  }
+
+  /** Moves a collider (shoved furniture) and keeps the spatial hash in sync. */
+  moveCollider(col: Collider, x0: number, y0: number, x1: number, y1: number) {
+    this.forCells(col.x0, col.y0, col.x1, col.y1, (key) => {
+      const list = this.hash.get(key);
+      if (!list) return;
+      const i = list.indexOf(col);
+      if (i >= 0) list.splice(i, 1);
+    });
+    col.x0 = x0; col.y0 = y0; col.x1 = x1; col.y1 = y1;
+    this.forCells(x0, y0, x1, y1, (key) => {
+      let list = this.hash.get(key);
+      if (!list) this.hash.set(key, (list = []));
+      list.push(col);
+    });
+  }
+
+  /** True if a box overlaps no wall and no other solid collider. */
+  boxFree(x0: number, y0: number, x1: number, y1: number, self?: Collider, ignore?: Set<Collider>): boolean {
+    const tx0 = Math.floor(x0 / TILE), tx1 = Math.floor(x1 / TILE);
+    const ty0 = Math.floor(y0 / TILE), ty1 = Math.floor(y1 / TILE);
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) if (this.tileSolid(tx, ty)) return false;
+    let free = true;
+    this.queryBox(x0, y0, x1, y1, (c) => {
+      if (c !== self && c.solid && c.alive && !ignore?.has(c)) free = false;
+    });
+    return free;
   }
 
   private forCells(x0: number, y0: number, x1: number, y1: number, fn: (key: number) => void) {

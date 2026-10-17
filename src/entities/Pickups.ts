@@ -120,7 +120,7 @@ export class Pickups {
         label = "SUGAR RUSH";
         break;
     }
-    g.fx.text(p.x, p.y - 26, label, { color: "#9dffb0", size: 16, dur: 0.9 });
+    g.fx.text(p.x, p.y - 26, label, { color: "#9fd3a8", size: 16, dur: 0.9 });
     g.fx.burst("star", p.x, p.y, 8, 0xffffff);
     g.audio.play("pickup", { vol: 0.45 });
     return true;

@@ -100,3 +100,26 @@ export function buildFurniture(scene: Phaser.Scene, map: OfficeMap, world: World
   }
   return { furniture, chairs };
 }
+
+/** Creates one piece of furniture mid-game (daily water coolers and power strips). */
+export function spawnFurniture(scene: Phaser.Scene, world: World, key: string, x: number, y: number, opts: { solid?: boolean; shots?: boolean } = {}): FurnObj {
+  const manifest = scene.cache.json.get("furnManifest") as Record<string, ManifestEntry>;
+  const me = manifest[key];
+  const w = me ? Math.max(14, me.footW * PPU * 0.94) : 40;
+  const h = me ? Math.max(14, me.footD * PPU * 0.94) : 40;
+  const sprite = scene.add.image(x, y, `furn_${key}`);
+  if (me) sprite.setOrigin(me.anchorX, me.anchorY);
+  sprite.setDepth(y + h / 2);
+  const b = baseKey(key);
+  const solid = opts.solid ?? !NOT_SOLID.has(b);
+  const shots = opts.shots ?? (solid && !NO_SHOTS.has(b));
+  const obj: FurnObj = { id: `dyn_${key}_${(spawnCounter++).toString(36)}`, key, x, y, w, h, sprite };
+  if (solid || shots) obj.collider = world.addCollider({ x0: x - w / 2, y0: y - h / 2, x1: x + w / 2, y1: y + h / 2, solid, shots, kind: "furniture", ref: obj });
+  return obj;
+}
+let spawnCounter = 0;
+
+export function destroyFurniture(world: World, f: FurnObj) {
+  f.sprite.destroy();
+  if (f.collider) world.removeCollider(f.collider);
+}

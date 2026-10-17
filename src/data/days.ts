@@ -5,12 +5,12 @@ export type ChoreId = "emails" | "print" | "shred" | "coffee" | "presentation" |
 
 export const CHORE_INFO: Record<ChoreId, { label: string; hold: number; room: string }> = {
   emails: { label: "Reply-All to Emails", hold: 3.0, room: "Executive Suite" },
-  print: { label: "Print the Q4 Budget", hold: 3.0, room: "Copy Room" },
-  shred: { label: "Shred the Evidence", hold: 2.5, room: "Copy Room" },
-  coffee: { label: "Fix the Coffee Machine", hold: 3.0, room: "Break Room" },
-  presentation: { label: "Prep the Board Deck", hold: 3.0, room: "Conference Room" },
-  memos: { label: "Sign the Layoff Memos", hold: 3.0, room: "HR Office" },
-  server: { label: "Reboot the Server", hold: 4.0, room: "Server Room" },
+  print: { label: "Print the Q4 Budget", hold: 3.0, room: "Copy Center" },
+  shred: { label: "Shred the Evidence", hold: 2.5, room: "Copy Center" },
+  coffee: { label: "Fix the Coffee Machine", hold: 3.0, room: "Cafeteria" },
+  presentation: { label: "Prep the Board Deck", hold: 3.0, room: "Boardroom" },
+  memos: { label: "Sign the Layoff Memos", hold: 3.0, room: "HR Department" },
+  server: { label: "Reboot the Server", hold: 4.0, room: "Server Core" },
   plant: { label: "Water the CEO's Plant", hold: 2.0, room: "Executive Suite" }
 };
 
@@ -35,13 +35,14 @@ export interface DayConfig {
 const CHORE_ORDER: ChoreId[] = ["emails", "print", "shred", "coffee", "presentation", "memos", "server", "plant"];
 
 /**
- * Chore load alternates between two knobs: odd steps add a chore, even steps make every chore's task longer.
- * Once all eight chores are on the list, only the "longer" knob keeps turning.
+ * Day 1 is three quick chores so the fight comes sooner. After that the load alternates between two knobs:
+ * odd steps add a chore, even steps make every chore's task longer. Once all eight chores are on the
+ * list, only the "longer" knob keeps turning.
  */
 export function choreLoad(day: number) {
   const step = day - 1;
-  const added = Math.min(CHORE_ORDER.length - 4, Math.ceil(step / 2));
-  return { count: 4 + added, lengthLevel: step - added };
+  const added = Math.min(CHORE_ORDER.length - 3, Math.ceil(step / 2));
+  return { count: 3 + added, lengthLevel: step - added };
 }
 
 function rollChores(count: number, prev?: ChoreId[]): ChoreId[] {

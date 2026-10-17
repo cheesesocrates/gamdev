@@ -1,5 +1,6 @@
 import { TILE } from "../config";
 import { World } from "./World";
+import { Tile } from "./OfficeMap";
 
 const DIRS: [number, number, number][] = [
   [1, 0, 10], [-1, 0, 10], [0, 1, 10], [0, -1, 10],
@@ -50,7 +51,7 @@ class Heap {
  */
 export class FlowField {
   dist: Float32Array;
-  constructor(private world: World, private extraCost?: (i: number) => number) {
+  constructor(private world: World, private extraCost?: (i: number) => number, private breakWalls = false) {
     this.dist = new Float32Array(world.w * world.h).fill(Infinity);
   }
 
@@ -64,7 +65,8 @@ export class FlowField {
     const start = ty * w + tx;
     this.dist[start] = 0;
     heap.push(start, 0);
-    const passable = (i: number) => walk[i] === 1 || barr[i] === 1;
+    const tilesArr = this.world.tiles;
+    const passable = (i: number) => walk[i] === 1 || barr[i] === 1 || (this.breakWalls && tilesArr[i] === Tile.DRYWALL);
     while (heap.size) {
       const cur = heap.pop();
       const cd = this.dist[cur];
@@ -77,6 +79,7 @@ export class FlowField {
         if (dx && dy && (!passable(cy * w + nx) || !passable(ny * w + cx))) continue;
         let nd = cd + cost;
         if (barr[ni]) nd += 160;
+        if (this.breakWalls && tilesArr[ni] === Tile.DRYWALL) nd += 50;
         if (this.extraCost) nd += this.extraCost(ni);
         if (nd < this.dist[ni]) {
           this.dist[ni] = nd;

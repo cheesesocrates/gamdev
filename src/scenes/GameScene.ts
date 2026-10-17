@@ -8,7 +8,8 @@ import { Hazards } from "../world/Hazards";
 import { Effects } from "../systems/Effects";
 import { AudioManager } from "../systems/Audio";
 import { GameState } from "../systems/GameState";
-import { Barricade, Station, Stations } from "../systems/Stations";
+import { Station, Stations } from "../systems/Stations";
+import { Props } from "../world/Props";
 import { Waves } from "../systems/Waves";
 import { Player, PlayerInput } from "../entities/Player";
 import { Enemy } from "../entities/Enemy";
@@ -16,14 +17,16 @@ import { Projectiles } from "../entities/Projectiles";
 import { Pickups } from "../entities/Pickups";
 import { CHORE_INFO, ChoreId, DayConfig, dayConfig } from "../data/days";
 import { EnemyType } from "../data/enemies";
-import { COMBO_WORDS, FIRED_WORDS, PHASE1_TIPS } from "../data/lines";
+import { COMBO_WORDS, FIRED_WORDS } from "../data/lines";
+import { PERK_BY_ID } from "../data/perks";
 import { PerkDef } from "../data/perks";
 import { FLOOR_INDEX, WALL_INDEX } from "./BootScene";
 import { ArrowMark, UI } from "../ui/UI";
-import { MiniHandle, MiniKind, MINI_KINDS, openMini } from "../ui/Minigames";
-import { chance, clamp, damp, formatClock, lerp, pick, rand, shuffle, weightedPick } from "../util/math";
+import { MiniHandle, openMini } from "../ui/Minigames";
+import { WEAPONS, WEAPON_DEFS, WeaponId } from "../data/weapons";
+import { angleDiff, chance, clamp, damp, formatClock, lerp, pick, rand, shuffle, weightedPick } from "../util/math";
 
-export type Phase = "title" | "crunch" | "review" | "announce" | "downsizing" | "dayclear" | "results" | "gameover";
+export type Phase = "title" | "brief" | "crunch" | "review" | "announce" | "downsizing" | "dayclear" | "results" | "gameover";
 
 type Keys = Record<"W" | "A" | "S" | "D" | "UP" | "DOWN" | "LEFT" | "RIGHT" | "SPACE" | "SHIFT" | "E" | "R" | "Q" | "F" | "ONE" | "TWO" | "THREE" | "ENTER" | "ESC" | "P" | "M", Phaser.Input.Keyboard.Key>;
 
@@ -39,9 +42,10 @@ interface HitInfo {
 }
 
 const BEST_KEY = "hostile-takeover-best";
-const PLAYER_SOURCES = new Set(["staple", "coffee", "shard", "laser", "orbit", "explosion", "ally", "chain", "nuke", "chair"]);
+const PLAYER_SOURCES = new Set(["staple", "coffee", "shard", "laser", "orbit", "explosion", "ally", "chain", "nuke", "chair", "plane", "confetti", "drop", "slip", "toner", "keyboard", "deflect"]);
+/** Shots that count toward the accuracy stat. */
+const AIMED = new Set(["staple", "coffee", "shard", "plane", "slip", "confetti", "keyboard", "deflect"]);
 
-const KIND_TAG: Record<MiniKind, string> = { timing: "timing", mash: "mash", whack: "whack", type: "typing", sequence: "memory", numbers: "numbers", track: "tracking" };
 
 export class GameScene extends Phaser.Scene {
   map!: OfficeMap;
@@ -60,6 +64,8 @@ export class GameScene extends Phaser.Scene {
   enemies: Enemy[] = [];
   flowNaive!: FlowField;
   flowSmart!: FlowField;
+  /** Bosses ignore drywall: they route straight through it and smash their way in. */
+  flowBoss!: FlowField;
   ui!: UI;
 
   phase: Phase = "title";
@@ -70,8 +76,6 @@ export class GameScene extends Phaser.Scene {
   crunchTotal = 120;
   choresDone = new Set<ChoreId>();
   /** The mini-game each chore uses today (re-rolled every day so tasks never feel the same). */
-  choreKinds: Partial<Record<ChoreId, MiniKind>> = {};
-  private lastKinds: Partial<Record<ChoreId, MiniKind>> = {};
   mini: MiniHandle | null = null;
   dayDamageBuff = 1;
   godMode = false;
@@ -81,6 +85,19 @@ export class GameScene extends Phaser.Scene {
   private wallLayer!: Phaser.Tilemaps.TilemapLayer;
   private keys!: Keys;
   private wheel = 0;
+  private wheelAt = 0;
+  private reviewGuns: { id: WeaponId; sold: boolean }[] = [];
+  /** A gun bought at today's review: it's in your hand when the fight starts. */
+  private newWeapon: WeaponId | null = null;
+  props!: Props;
+  private hearts: { x: number; y: number; life: number; sprite: Phaser.GameObjects.Image }[] = [];
+  private vortices: { x: number; y: number; t: number; a: number }[] = [];
+  private sprinklerFloods: { x: number; y: number; t: number; size: number }[] = [];
+  private handshakeCount = 0;
+  private miniZoomBase = 0;
+  private briefing = false;
+  private lmbPressed = false;
+  private swings: { x: number; y: number; a: number; life: number }[] = [];
   /** Keys pressed since last frame (event-driven so quick taps are never lost). */
   private pressed = new Set<string>();
   private rmb = false;
@@ -122,6 +139,10 @@ export class GameScene extends Phaser.Scene {
   private reviewNotes: { text: string; kind: "good" | "bad" | "" }[] = [];
   private lightPhase = 0;
   private sprinklerCd = 0;
+  /** Pyramid Scheme: firings today (each adds a little damage). */
+  private dayKills = 0;
+  private killsForPromotion = 0;
+  private drones: { img: Phaser.GameObjects.Image; x: number; y: number; cd: number; bob: number }[] = [];
   private sprinklerT = 0;
   private sprinklerAt = { x: 0, y: 0 };
 
@@ -145,14 +166,17 @@ export class GameScene extends Phaser.Scene {
     this.hazards = new Hazards(this, this.world, this.fx, this.audio);
     this.flowNaive = new FlowField(this.world);
     this.flowSmart = new FlowField(this.world, (i) => (this.hazards.fire[i] > 0 ? 45 : 0) + (this.hazards.electric[i] ? 70 : 0));
+    this.flowBoss = new FlowField(this.world, undefined, true);
     this.projectiles = new Projectiles(this);
     this.pickups = new Pickups(this);
     this.stations = new Stations(this);
+    this.props = new Props(this, this.furniture, new Set(this.stations.list.map((s) => s.furn).filter((f): f is NonNullable<typeof f> => !!f)));
     this.waves = new Waves(this);
     this.player = new Player(this, this.map.playerSpawn.x, this.map.playerSpawn.y);
 
     this.laserGfx = this.add.graphics().setDepth(DEPTH.PROJECTILE + 2).setBlendMode(Phaser.BlendModes.ADD);
     this.chainGfx = this.add.graphics().setDepth(DEPTH.PROJECTILE + 3).setBlendMode(Phaser.BlendModes.ADD);
+    this.hpGfx = this.add.graphics().setDepth(DEPTH.WORLD_UI - 2);
     this.dimRect = this.add.rectangle(0, 0, 10, 10, 0xffffff).setOrigin(0).setDepth(DEPTH.LIGHTING).setBlendMode(Phaser.BlendModes.MULTIPLY);
     this.redRect = this.add.rectangle(0, 0, 10, 10, 0xff1020, 0).setOrigin(0).setDepth(DEPTH.LIGHTING + 2).setBlendMode(Phaser.BlendModes.ADD);
     this.flashlight = this.add.image(0, 0, "soft").setBlendMode(Phaser.BlendModes.ADD).setDepth(DEPTH.LIGHTING + 1).setTint(0xfff0d0).setAlpha(0).setScale(9);
@@ -167,6 +191,12 @@ export class GameScene extends Phaser.Scene {
     this.camY = this.player.y;
 
     this.ui = new UI();
+    this.ui.sfx = (s) => {
+      if (s === "hover") this.audio.play("hover", { vol: 0.22, minGap: 40 });
+      else if (s === "click") this.audio.play("click", { vol: 0.5 });
+      else if (s === "deal") this.audio.play("paper", { vol: 0.3, rate: 1.2, jitter: 0.15, minGap: 50 });
+      else this.audio.play("drop", { vol: 0.6 });
+    };
     this.ui.initMinimap(this.map, this.world);
     this.ui.hideBoot(() => this.audio.play("select", { vol: 0.5 }));
 
@@ -217,6 +247,8 @@ export class GameScene extends Phaser.Scene {
     let idx: number = WALL_INDEX.CAP;
     if (t === Tile.WALL) {
       if (below) idx = y === 0 && x % 3 !== 0 ? WALL_INDEX.WINDOW : (x * 7 + y * 3) % 9 === 0 ? WALL_INDEX.FACE_ALT : WALL_INDEX.FACE;
+    } else if (t === Tile.DRYWALL) {
+      idx = below ? WALL_INDEX.DRY_FACE : WALL_INDEX.DRY_CAP;
     } else if (t === Tile.GLASS) idx = below ? WALL_INDEX.GLASS_FACE : WALL_INDEX.GLASS;
     else if (t === Tile.ELEVATOR) idx = this.map.spawns.some((s) => s.kind === "elevator" && s.doorTx === x) ? WALL_INDEX.ELEV_L : WALL_INDEX.ELEV_R;
     else if (t === Tile.EXIT_DOOR) idx = this.map.spawns.some((s) => s.kind === "exit" && s.doorTx === x) ? WALL_INDEX.EXIT_L : WALL_INDEX.EXIT_R;
@@ -227,9 +259,15 @@ export class GameScene extends Phaser.Scene {
     this.keys = this.input.keyboard!.addKeys("W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,SHIFT,E,R,Q,F,ONE,TWO,THREE,ENTER,ESC,P,M") as Keys;
     this.input.mouse?.disableContextMenu();
     this.input.keyboard!.on("keydown", (ev: KeyboardEvent) => { if (!ev.repeat) this.pressed.add(ev.code); });
-    this.input.on("wheel", (_p: unknown, _o: unknown, _dx: number, dy: number) => { this.wheel += Math.sign(dy); });
+    // One weapon per wheel notch; trackpads fire dozens of tiny events, so rate-limit them.
+    this.input.on("wheel", (_p: unknown, _o: unknown, _dx: number, dy: number) => {
+      if (Math.abs(dy) < 1 || this.time.now - this.wheelAt < 130) return;
+      this.wheelAt = this.time.now;
+      this.wheel = Math.sign(dy);
+    });
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
       if (p.rightButtonDown()) this.rmb = true;
+      if (p.leftButtonDown()) this.lmbPressed = true;
       if (this.phase === "announce") this.skipAnnounce();
     });
   }
@@ -251,11 +289,11 @@ export class GameScene extends Phaser.Scene {
     this.ui.setHudMode("none");
     this.audio.setMusic("title");
     const best = this.loadBest();
-    this.ui.showTitle(best ? `BEST: SURVIVED ${best.days} DAY${best.days === 1 ? "" : "S"} · ${best.fired} FIRED` : "", () => {
-      this.audio.play("click", { vol: 0.6 });
+    const go = () => {
       this.ui.closeScreen("title");
       this.startRun();
-    });
+    };
+    this.ui.showTitle(best ? `BEST: SURVIVED ${best.days} DAY${best.days === 1 ? "" : "S"} · ${best.fired} FIRED` : "", { play: go, tutorial: go });
   }
 
   private startRun() {
@@ -272,14 +310,27 @@ export class GameScene extends Phaser.Scene {
     this.hazards.clear();
     this.fx.clearDecals();
     this.stations.resetDay();
-    // Overnight repairs: glass panes come back.
+    // Overnight repairs: glass panes and smashed walls come back.
     for (let i = 0; i < this.map.tiles.length; i++) {
-      if (this.map.tiles[i] !== Tile.GLASS) continue;
-      this.world.tiles[i] = Tile.GLASS;
-      this.world.glassHp.set(i, 3);
+      const t = this.map.tiles[i];
+      if (t !== Tile.GLASS && t !== Tile.DRYWALL) continue;
+      if (this.world.tiles[i] === t && t !== Tile.GLASS) continue;
+      this.world.tiles[i] = t;
+      if (t === Tile.GLASS) this.world.glassHp.set(i, 3);
+      this.world.wallHp.delete(i);
+      if (t === Tile.DRYWALL) this.floorLayer.removeTileAt(i % MAP_W, Math.floor(i / MAP_W));
       this.placeWallTile(i % MAP_W, Math.floor(i / MAP_W));
+      const above = i - MAP_W;
+      if (above >= 0 && this.world.tiles[above] !== Tile.FLOOR) this.placeWallTile(above % MAP_W, Math.floor(above / MAP_W));
     }
     this.world.rebuildNav();
+    this.props.reset();
+    this.stations.randomizeProps();
+    for (const h of this.hearts) h.sprite.destroy();
+    this.hearts = [];
+    this.vortices = [];
+    this.sprinklerFloods = [];
+    this.sprinklerT = 0;
     this.chairs.forEach((c, k) => {
       const h = this.chairHomes[k];
       c.x = h.x; c.y = h.y; c.rot = h.rot; c.vx = c.vy = c.spin = 0;
@@ -293,7 +344,7 @@ export class GameScene extends Phaser.Scene {
     p.dead = false;
     p.invuln = p.stun = p.rolling = p.slip = 0;
     p.tempHp = 0;
-    p.shredBag = 0;
+    p.shredBag = GameState.stats.kindling ? 40 : 0;
     p.dayMagBonus = p.dayCupBonus = 0;
     p.weapon = "stapler";
     p.setArmed(false);
@@ -304,6 +355,7 @@ export class GameScene extends Phaser.Scene {
     this.combo = 0;
     this.comboTimer = 0;
     this.dayDamageBuff = 1;
+    this.dayKills = 0;
     this.choresDone.clear();
     this.waves.reset();
     this.setWindowsNight(false);
@@ -317,28 +369,26 @@ export class GameScene extends Phaser.Scene {
     this.resetWorldForDay(day);
     this.ui.initMinimap(this.map, this.world);
     this.spawnNpcs(this.dayCfg.npcs);
-    this.rollChoreKinds();
     this.crunchTotal = GameState.crunchSeconds();
     this.crunchLeft = this.crunchTotal;
     this.quota = this.dayCfg.quota;
     this.hurryVoiced = false;
     this.lastTick = -1;
-    this.phase = "crunch";
     this.paused = false;
+    this.phase = "brief";
+    this.ui.setHudMode("none");
+    this.ui.brief("crunch", () => this.beginCrunch(day));
+  }
+
+  private beginCrunch(day: number) {
+    this.phase = "crunch";
     this.ui.setHudMode("crunch");
     this.audio.setMusic("lobby");
     this.audio.setMusicRate(1);
     const g = this.dayCfg.growth;
-    const sub = g === "more" ? "More chores on the list today" : g === "longer" ? "Same chores, but every task runs longer" : "Finish your chores before 5";
-    this.ui.banner(`DAY ${day}`, `3:00 PM · ${sub}`, g ? "#ffcf3f" : "#ffffff", 2.6);
+    const sub = g === "more" ? "One more chore today" : g === "longer" ? "Chores take longer today" : "Chores due by 5 PM";
+    this.ui.banner(`DAY ${day}`, sub, g ? "#e9c25a" : "#ffffff", 2.4);
     this.time.delayedCall(300, () => this.autoCompleteChores());
-    this.time.delayedCall(2600, () => {
-      if (this.phase === "crunch") this.ui.toast(day === 1 ? PHASE1_TIPS[0] : pick(PHASE1_TIPS), "#4fd1ff", 5);
-    });
-    if (day === 1) {
-      this.time.delayedCall(8500, () => { if (this.phase === "crunch") this.ui.toast(PHASE1_TIPS[2], "#ff6b6b", 6); });
-      this.time.delayedCall(16000, () => { if (this.phase === "crunch") this.ui.toast(PHASE1_TIPS[1], "#ffcf3f", 6); });
-    }
   }
 
   private spawnNpcs(n: number) {
@@ -358,7 +408,7 @@ export class GameScene extends Phaser.Scene {
   private updateCrunch(dt: number, inp: PlayerInput) {
     if (this.mini) {
       // Hands on the task: the boss stands still while the clock keeps ticking.
-      this.player.update(dt, { ...inp, mx: 0, my: 0, fire: false, dodge: false, reload: false, switchTo: null, cycle: 0 });
+      this.player.update(dt, { ...inp, mx: 0, my: 0, fire: false, firePressed: false, dodge: false, reload: false, switchTo: null, cycle: 0 });
     } else {
       this.player.update(dt, inp);
       this.handleInteraction(dt);
@@ -369,7 +419,6 @@ export class GameScene extends Phaser.Scene {
       this.hurryVoiced = true;
       this.audio.voice("hurry_up", 0.8);
       this.audio.setMusicRate(1.08);
-      this.ui.toast("20 seconds until 5:00 PM!", "#ff6b6b", 3);
     }
     if (left <= 10) {
       const s = Math.ceil(left);
@@ -378,29 +427,12 @@ export class GameScene extends Phaser.Scene {
         this.audio.play("tick", { vol: 0.5, jitter: 0 });
       }
     }
-    if (inp.fire && this.holsterToastCd <= 0) {
-      this.holsterToastCd = 3;
-      this.ui.toast("No violence before 5:00 PM. HR is watching.", "#ff6b6b", 2);
-    }
+    if (inp.fire) this.tipOnce("holster", "No shooting before 5:00 PM. Chores first.", "#d0574a");
     if ((this.pressed.has("Enter") || this.pressed.has("NumpadEnter")) && this.allChoresDone()) {
       this.endCrunch(true);
       return;
     }
     if (left <= 0) this.endCrunch(false);
-  }
-
-  /** Gives every chore a mini-game, never the one it had yesterday, spread across the day's chores. */
-  private rollChoreKinds() {
-    const bag: MiniKind[] = [];
-    const next: Partial<Record<ChoreId, MiniKind>> = {};
-    for (const c of this.dayCfg.chores) {
-      if (!bag.length) bag.push(...shuffle([...MINI_KINDS]));
-      let i = bag.findIndex((k) => k !== this.lastKinds[c]);
-      if (i < 0) i = 0;
-      next[c] = bag.splice(i, 1)[0];
-    }
-    this.choreKinds = next;
-    this.lastKinds = { ...this.lastKinds, ...next };
   }
 
   /** "Out of Office" upgrade: some chores do themselves. */
@@ -410,29 +442,44 @@ export class GameScene extends Phaser.Scene {
       if (n <= 0) break;
       if (this.choresDone.has(c)) continue;
       n--;
-      this.ui.toast(`Out of Office: ${CHORE_INFO[c].label} handled itself`, "#52d17c", 3);
+      this.ui.toast(`Out of Office: ${CHORE_INFO[c].label} handled itself`, "#4b9a63", 3);
       this.completeChore(c);
-      if (c === "coffee") { this.stations.coffeeFixed = true; GameState.unlocked.coffee = true; }
     }
   }
 
   startMini(chore: ChoreId, onDone: () => void) {
     if (this.mini || this.phase !== "crunch") return;
-    const kind = this.choreKinds[chore] ?? pick(MINI_KINDS);
     const len = Math.max(0.5, (1 + this.dayCfg.lengthLevel * 0.35) * (0.6 + 0.4 * GameState.stats.interactMult));
     this.interactProgress = 0;
     this.ui.setPrompt(null);
+    this.zoomMini();
     this.mini = openMini(this.ui.root, {
-      kind, chore, title: CHORE_INFO[chore].label, len,
+      chore, title: CHORE_INFO[chore].label, len,
       sfx: (n) => {
         if (n === "good") this.audio.play("confirm", { vol: 0.35, jitter: 0.1 });
         else if (n === "bad") this.audio.play("soft_heavy", { vol: 0.4 });
         else if (n === "win") this.audio.play("powerup", { vol: 0.4 });
         else this.audio.play("click", { vol: 0.25, minGap: 60 });
       },
-      onDone: () => { this.mini = null; onDone(); },
-      onCancel: () => { this.mini = null; this.pressed.clear(); }
+      onDone: () => { this.mini = null; this.unzoomMini(); this.input.keyboard?.resetKeys(); onDone(); },
+      onCancel: () => { this.mini = null; this.unzoomMini(); this.input.keyboard?.resetKeys(); this.pressed.clear(); }
     });
+  }
+
+  /** Lean the camera in on the task while a mini-game is open. */
+  private zoomMini() {
+    const cam = this.cameras.main;
+    if (!this.miniZoomBase) this.miniZoomBase = cam.zoom;
+    this.tweens.killTweensOf(cam);
+    this.tweens.add({ targets: cam, zoom: this.miniZoomBase * 1.35, duration: 450, ease: "Cubic.easeOut" });
+  }
+
+  private unzoomMini() {
+    if (!this.miniZoomBase) return;
+    const cam = this.cameras.main;
+    this.tweens.killTweensOf(cam);
+    this.tweens.add({ targets: cam, zoom: this.miniZoomBase, duration: 300, ease: "Cubic.easeOut" });
+    this.miniZoomBase = 0;
   }
 
   allChoresDone() {
@@ -445,27 +492,21 @@ export class GameScene extends Phaser.Scene {
     if (this.dayCfg.chores.includes(c)) GameState.dayStats.choresDone++;
     this.audio.jingle("jingle_chore", 0.5);
     this.audio.play("confirm", { vol: 0.5 });
-    this.ui.toast(`✓ ${CHORE_INFO[c].label}`, "#52d17c", 2.2);
-    this.fx.text(this.player.x, this.player.y - 40, "DONE!", { color: "#52d17c", size: 20, pop: true });
-    if (c === "presentation" && !GameState.unlocked.laser) {
-      GameState.unlocked.laser = true;
-      this.unlockBanner("LASER POINTER", "Hold to fire a burning beam. Press 3. Sets paper ablaze.");
-    }
-    if (this.dayCfg.chores.includes(c) && this.allChoresDone()) {
-      this.audio.voice("objective_achieved", 0.7);
-      this.ui.toast("All chores done! Press ENTER to clock out and bank your leftover time.", "#52d17c", 5);
-    }
+    this.fx.text(this.player.x, this.player.y - 40, "DONE!", { color: "#4b9a63", size: 20, pop: true });
+    if (this.dayCfg.chores.includes(c) && this.allChoresDone()) this.audio.voice("objective_achieved", 0.7);
   }
 
-  unlockBanner(name: string, desc: string) {
-    this.ui.unlock(name, desc);
+  unlockBanner(name: string, desc: string, weapon?: WeaponId) {
+    this.ui.unlock(name, desc, weapon, weapon ? WEAPON_DEFS[weapon].color : undefined);
     this.audio.play("levelup", { vol: 0.6 });
   }
 
   private endCrunch(early: boolean) {
-    const leftover = early ? Math.floor(Math.max(0, this.crunchLeft)) : 0;
+    // Clocking out early pays overtime at half rate: upgrades are meant to be scarce.
+    const leftover = early ? Math.floor(Math.max(0, this.crunchLeft) / 2) : 0;
     this.mini?.close();
     this.mini = null;
+    this.unzoomMini();
     const choreBonus = this.choresDone.size * (3 + GameState.stats.choreBonusSec);
     const missed = this.dayCfg.chores.filter((c) => !this.choresDone.has(c));
     GameState.bank += leftover + choreBonus;
@@ -473,7 +514,7 @@ export class GameScene extends Phaser.Scene {
     GameState.dayStats.choresTotal = this.dayCfg.chores.length;
     this.quota = this.dayCfg.quota + missed.length * 2;
     this.reviewNotes = [];
-    if (early) this.reviewNotes.push({ text: `+${leftover}s for clocking out early`, kind: "good" });
+    if (early) this.reviewNotes.push({ text: `+${leftover}s for clocking out early (half rate)`, kind: "good" });
     else this.audio.voice("time_over", 0.8);
     if (choreBonus) this.reviewNotes.push({ text: `+${choreBonus}s chore bonus (${this.choresDone.size} done)`, kind: "good" });
     if (missed.length) this.reviewNotes.push({ text: `${missed.length} missed deadline${missed.length > 1 ? "s" : ""}: +${missed.length * 2} to today's firing quota`, kind: "bad" });
@@ -487,24 +528,48 @@ export class GameScene extends Phaser.Scene {
     this.audio.setMusic("review");
     this.audio.setMusicRate(1);
     this.reviewOffers = this.rollShop();
-    this.renderReview();
+    this.reviewGuns = this.rollGuns();
+    this.ui.brief("review", () => this.renderReview());
   }
 
-  /** Upgrades are scarce on purpose: four offers at a markup, so a good day buys one, a great day two. */
+  /** Two guns you don't own yet; you can buy one of them per review. */
+  private rollGuns() {
+    return shuffle(WEAPONS.filter((w) => w !== "stapler" && !GameState.unlocked[w])).slice(0, 2).map((id) => ({ id, sold: false }));
+  }
+
+  /**
+   * Upgrades are scarce on purpose: three offers at a markup (one guaranteed epic or better),
+   * so a good day buys one and a great day two.
+   */
   private rollShop() {
-    return GameState.rollPerks(4).map((perk) => ({ perk: { ...perk, cost: Math.ceil(perk.cost * 1.5) }, sold: false }));
+    return GameState.rollSlots(["common", "rare", "epic"]).map((perk) => ({ perk: { ...perk, cost: Math.ceil(perk.cost * 1.5) }, sold: false }));
   }
 
   private renderReview() {
     const healCost = 10, rerollCost = 7;
+    const gunBought = this.reviewGuns.some((g) => g.sold);
     this.ui.showReview({
       bank: GameState.bank,
       notes: this.reviewNotes,
       offers: this.reviewOffers.map((o) => ({ ...o, stacks: GameState.stack(o.perk.id) })),
+      guns: this.reviewGuns.map((g) => ({ ...WEAPON_DEFS[g.id], sold: g.sold, locked: gunBought && !g.sold })),
       healCost,
       canHeal: GameState.hp < GameState.stats.maxHp,
       rerollCost
     }, {
+      buyGun: (i) => {
+        const g = this.reviewGuns[i];
+        if (!g || g.sold || this.reviewGuns.some((o) => o.sold)) return;
+        const cost = WEAPON_DEFS[g.id].cost;
+        if (GameState.bank < cost) return;
+        GameState.bank -= cost;
+        GameState.unlocked[g.id] = true;
+        g.sold = true;
+        this.newWeapon = g.id;
+        this.audio.play("reload_done", { vol: 0.7 });
+        this.audio.play("powerup", { vol: 0.5 });
+        this.renderReview();
+      },
       buy: (i) => {
         const o = this.reviewOffers[i];
         if (!o || o.sold || GameState.bank < o.perk.cost || !GameState.canTake(o.perk)) return;
@@ -530,7 +595,6 @@ export class GameScene extends Phaser.Scene {
       },
       go: () => {
         this.ui.closeScreen("review");
-        this.audio.play("click", { vol: 0.6 });
         this.startAnnouncement();
       }
     });
@@ -561,8 +625,8 @@ export class GameScene extends Phaser.Scene {
       type(2, `${this.quota} WILL BE FIRED BY THE END OF TODAY.`, "red");
       for (const e of this.enemies) {
         if (e.mode !== "npc") continue;
-        e.sprite.setTint(0xff6b6b);
-        this.fx.text(e.x, e.y - 34, "!", { color: "#ff3b55", size: 30, pop: true, dur: 1.4 });
+        e.sprite.setTint(0xd0574a);
+        this.fx.text(e.x, e.y - 34, "!", { color: "#c4382c", size: 30, pop: true, dur: 1.4 });
       }
       this.audio.voice("prepare_yourself", 0.9);
     });
@@ -570,12 +634,25 @@ export class GameScene extends Phaser.Scene {
       type(3, "GOOD LUCK.", "huge");
       this.audio.voice(`round_${Math.min(5, GameState.day)}`, 0.9);
     });
-    at(5300, () => this.startDownsizing());
+    at(5300, () => this.toFight());
   }
 
   private skipAnnounce() {
-    if (this.phase !== "announce") return;
-    this.startDownsizing();
+    if (this.phase !== "announce" || this.briefing) return;
+    this.toFight();
+  }
+
+  /** End of the 5 PM speech: the first time, explain the fight before it starts. */
+  private toFight() {
+    if (this.briefing) return;
+    for (const t of this.announceTimers) t.remove(false);
+    this.announceTimers = [];
+    this.ui.closeScreen("announce");
+    this.briefing = true;
+    this.ui.brief("downsizing", () => {
+      this.briefing = false;
+      if (this.phase === "announce") this.startDownsizing();
+    });
   }
 
   private startDownsizing() {
@@ -585,6 +662,8 @@ export class GameScene extends Phaser.Scene {
     this.phase = "downsizing";
     this.player.setArmed(true);
     this.player.refill();
+    if (this.newWeapon && this.player.weaponUnlocked(this.newWeapon)) this.player.weapon = this.newWeapon;
+    this.newWeapon = null;
     for (const e of this.enemies) if (e.mode === "npc") e.turnHostile();
     // Some coworkers stay put in their own rooms and ambush you when you wander in.
     const lurkers = shuffle(this.enemies.filter((e) => e.hostile && !e.def.boss && Math.hypot(e.x - this.player.x, e.y - this.player.y) > 560));
@@ -594,18 +673,21 @@ export class GameScene extends Phaser.Scene {
     }
     this.waves.reset();
     this.hazards.setAllElectric(GameState.stats.electric);
+    const stx = GameState.stats;
+    if (stx.fireDrill) this.time.delayedCall(700, () => { if (this.phase === "downsizing") this.activateSprinklers("FIRE DRILL!", "Everybody out... onto the wet floor."); });
+    for (let k = 0; k < stx.plusOne; k++) {
+      const pt = this.world.nearestWalkable(this.player.x + rand(-50, 50), this.player.y + 50);
+      const a = this.spawnEnemy("intern", pt.x, pt.y, "ally");
+      a.makeAlly(30);
+      this.fx.text(pt.x, pt.y - 40, "PLUS ONE!", { color: "#9fd3a8", size: 15, pop: true });
+    }
     if (GameState.stats.prepShield) this.player.tempHp = Math.max(this.player.tempHp, GameState.stats.prepShield * 2);
     this.audio.setMusic("fight", 0.2);
     this.audio.voice("fight", 1);
     this.ui.setDusk(0);
     this.ui.setHudMode("fight");
     this.ui.flash("#ff2040", 260, 0.5);
-    this.ui.banner("FIGHT!", `Fire ${this.quota} coworkers before they fire you`, "#ff3b55", 1.8);
-    if (GameState.day === 1) {
-      this.time.delayedCall(1900, () => {
-        if (this.phase === "downsizing") this.ui.toast("<b>LMB</b> fire · <b>1 2 3</b> weapons · <b>SPACE</b> dodge roll · <b>R</b> reload · kick coolers mid-fight with <b>E</b>", "#ff3b55", 6);
-      });
-    }
+    this.ui.banner("FIGHT!", `Fire ${this.quota} coworkers before they fire you`, "#c4382c", 1.8);
     this.fx.shake(0.6);
     const cam = this.cameras.main;
     const z = cam.zoom;
@@ -631,6 +713,7 @@ export class GameScene extends Phaser.Scene {
     this.handleInteraction(dt);
     this.waves.update(dt);
     this.updateOrbiters(dt);
+    this.updateDrones(dt);
     if (this.comboTimer > 0) {
       this.comboTimer -= dt;
       if (this.comboTimer <= 0) {
@@ -641,6 +724,8 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.bulletTimeCd > 0) this.bulletTimeCd -= dt;
     this.updateSprinklers(dt);
+    this.updateHearts(dt);
+    this.updateVortices(dt);
     const bossAlive = this.waves.boss && !this.waves.boss.dead;
     if (this.waves.boss && !this.waves.boss.dead) this.ui.setBoss("THE CONSULTANT", this.waves.boss.hp / this.waves.boss.maxHp);
     else this.ui.setBoss(null, 0);
@@ -658,7 +743,7 @@ export class GameScene extends Phaser.Scene {
     this.audio.voice(flawless ? "flawless_victory" : "you_win", 0.95);
     this.audio.jingle("jingle_win", 0.7);
     this.audio.setMusic("none", 1.5);
-    this.ui.banner("QUOTA MET", flawless ? "FLAWLESS. NOT A SCRATCH." : `Day ${GameState.day} survived`, "#ffcf3f", 2.4);
+    this.ui.banner("QUOTA MET", flawless ? "FLAWLESS. NOT A SCRATCH." : `Day ${GameState.day} survived`, "#e9c25a", 2.4);
     this.ui.flash("#ffffff", 400, 0.5);
     this.time.delayedCall(2400, () => this.showResults());
   }
@@ -670,7 +755,7 @@ export class GameScene extends Phaser.Scene {
     const ds = GameState.dayStats;
     const dmg = ds.damageTaken;
     const grade = dmg === 0 ? "S" : dmg <= 2 ? "A" : dmg <= 4 ? "B" : dmg <= 6 ? "C" : "D";
-    const gradeColor = { S: "#ffcf3f", A: "#52d17c", B: "#4fd1ff", C: "#c9d1dc", D: "#ff6b6b" }[grade]!;
+    const gradeColor = { S: "#e9c25a", A: "#4b9a63", B: "#6aa3b4", C: "#c9d1dc", D: "#d0574a" }[grade]!;
     const title = { S: "Exceeds all expectations. Promoted to Senior VP of Firing.", A: "Exceeds expectations.", B: "Meets expectations.", C: "Needs improvement.", D: "On a performance improvement plan." }[grade]!;
     const acc = ds.shots ? Math.round((ds.hits / Math.max(1, ds.shots)) * 100) : 0;
     this.audio.setMusic("review");
@@ -758,7 +843,14 @@ export class GameScene extends Phaser.Scene {
         this.interactTarget = near.station;
         this.interactProgress = 0;
       }
-      if (this.keys.E.isDown && p.stun <= 0) {
+      if (near.action.hold <= 0) {
+        // Chores, traps and pickups all happen the moment E is pressed.
+        if (this.pressed.has("KeyE") && p.stun <= 0) {
+          near.action.run();
+          if (near.action.kind !== "chore") this.audio.play("confirm", { vol: 0.35 });
+        }
+        this.interactProgress = 0;
+      } else if (this.keys.E.isDown && p.stun <= 0) {
         this.interactProgress += dt / Math.max(0.05, near.action.hold);
         this.interactTick -= dt;
         if (this.interactTick <= 0) {
@@ -830,16 +922,33 @@ export class GameScene extends Phaser.Scene {
       dmg *= 2.5;
       crit = true;
     }
-    if (fromPlayer) dmg *= this.dayDamageBuff;
-    const killed = e.takeDamage(dmg, info.angle, info.knock * st.knockbackMult);
-    if (fromPlayer && (info.kind === "staple" || info.kind === "coffee" || info.kind === "shard")) GameState.dayStats.hits++;
+    if (fromPlayer) dmg *= this.dayDamageBuff * (1 + Math.min(st.pyramid * 0.3, this.dayKills * 0.01 * (1 + st.pyramid)));
+    if (fromPlayer && this.player.dugIn) dmg *= 1.4;
+    // Sticky Notes: enough of them and a coworker just stands there, confused.
+    if (fromPlayer && st.sticky && AIMED.has(info.kind) && !e.def.boss && e.hostile) {
+      e.notes++;
+      if (e.notes >= (st.sticky >= 2 ? 2 : 3)) {
+        e.notes = 0;
+        e.stun = Math.max(e.stun, 1.5);
+        this.fx.text(e.x, e.y - 48, "???", { color: "#e9c25a", size: 20, pop: true, dur: 0.8 });
+      }
+    }
+    // Soaked coworkers conduct beautifully.
+    if (e.soaked > 0 && (info.kind === "zap" || info.kind === "chain")) dmg *= 2;
+    let killed = e.takeDamage(dmg, info.angle, info.knock * st.knockbackMult);
+    if (!killed && fromPlayer && st.execute && !e.def.boss && e.hp / e.maxHp < st.execute) {
+      e.hp = 0;
+      killed = true;
+      this.fx.text(e.x, e.y - 52, "TWO WEEKS' NOTICE", { color: "#6f5aa0", size: 15, pop: true, dur: 0.9 });
+    }
+    if (fromPlayer && AIMED.has(info.kind)) GameState.dayStats.hits++;
     if (!info.silent) {
       this.fx.text(e.x + rand(-12, 12), e.y - e.r - 12, String(Math.max(1, Math.round(dmg))), {
-        size: crit ? 24 : 15, color: crit ? "#ffcf3f" : "#ffffff", dur: crit ? 0.8 : 0.5, rise: 80, pop: crit
+        size: crit ? 24 : 15, color: crit ? "#e9c25a" : "#ffffff", dur: crit ? 0.8 : 0.5, rise: 80, pop: crit
       });
       if (info.kind !== "laser") this.fx.spray("confetti", e.x, e.y, crit ? 7 : 3, info.angle, 45);
       this.audio.play("hit", { vol: crit ? 0.45 : 0.28, minGap: 45, rate: crit ? 0.8 : 1 });
-      if (crit) this.fx.burst("star", e.x, e.y, 6, 0xffcf3f);
+      if (crit) this.fx.burst("star", e.x, e.y, 6, 0xe9c25a);
     }
     if (fromPlayer && info.kind !== "chain" && info.kind !== "explosion" && info.kind !== "nuke") {
       if (st.ignite > 0) {
@@ -847,8 +956,8 @@ export class GameScene extends Phaser.Scene {
         e.burnDps = Math.max(e.burnDps, 11 * st.ignite * st.dmgMult);
       }
       if (info.kind === "coffee") {
-        e.burn = Math.max(e.burn, 1.6);
-        e.burnDps = Math.max(e.burnDps, 7 * st.dmgMult);
+        e.burn = Math.max(e.burn, st.irish ? 2.6 : 1.6);
+        e.burnDps = Math.max(e.burnDps, (st.irish ? 30 : 7) * st.dmgMult);
         if (st.coldBrew) e.slow = 2.4;
       }
       if (st.chain > 0 && !info.noChain) this.chainLightning(e, dmg * 0.5, st.chain);
@@ -892,8 +1001,16 @@ export class GameScene extends Phaser.Scene {
     GameState.totalFired++;
     GameState.dayStats.fired++;
 
+    // Golden Handshake: every 4th firing pays a little overtime.
+    if (byPlayer && st.handshake && ++this.handshakeCount % 4 === 0) {
+      GameState.bank += 2 * st.handshake;
+      this.fx.text(x, y - 64, `+${2 * st.handshake}s OVERTIME`, { color: "#e9c25a", size: 16, pop: true, dur: 1 });
+    }
+    // Chain of Command: fire someone who shoots back and the room freezes.
+    if (byPlayer && st.command && e.def.ranged && !e.def.boss) this.shockwave(x, y, 260, 0, 1.6, 0xe9c25a, "LEADERLESS!");
+
     const boss = e.def.boss;
-    this.fx.text(x, y - 36, boss ? "THE CONSULTANT HAS BEEN LET GO" : pick(FIRED_WORDS), { color: "#ff3b55", size: boss ? 30 : 22, pop: true, dur: boss ? 2.2 : 1.0, rise: 50 });
+    this.fx.text(x, y - 36, boss ? "THE CONSULTANT HAS BEEN LET GO" : pick(FIRED_WORDS), { color: "#c4382c", size: boss ? 30 : 22, pop: true, dur: boss ? 2.2 : 1.0, rise: 50 });
     this.fx.burst("confetti", x, y, boss ? 60 : 16);
     this.fx.burst("pixel", x, y, 8, 0xf3eedf);
     this.fx.decal(x + rand(-6, 6), y + 10, "furn_belongings", { scale: boss ? 1.6 : 0.95, rot: rand(-0.4, 0.4) });
@@ -904,7 +1021,7 @@ export class GameScene extends Phaser.Scene {
     if (boss) {
       this.explosion(x, y, 240, 150, { friendly: true });
       this.fx.slowmo(0.25, 1.4);
-      this.ui.flash("#ffcf3f", 500, 0.6);
+      this.ui.flash("#e9c25a", 500, 0.6);
       this.audio.voice("winner", 0.9);
       for (let k = 0; k < 4; k++) this.pickups.spawn(k === 0 ? "pizza" : "donut", x, y);
     }
@@ -947,8 +1064,33 @@ export class GameScene extends Phaser.Scene {
         this.killsForIntern = 0;
         const a = this.spawnEnemy("intern", x, y, "ally");
         a.makeAlly(st.interns >= 2 ? 22 : 15);
-        this.fx.text(x, y - 50, "INTERN RECRUITED!", { color: "#9dffb0", size: 17, pop: true });
+        this.fx.text(x, y - 50, "INTERN RECRUITED!", { color: "#9fd3a8", size: 17, pop: true });
         this.audio.play("upgrade", { vol: 0.5 });
+      }
+    }
+    this.dayKills++;
+    if (st.chainmail) {
+      let from = { x, y };
+      const skip = new Set<number>();
+      for (let k = 0; k < st.chainmail; k++) {
+        const next = this.nearestEnemy(from.x, from.y, 340, skip);
+        if (!next) break;
+        skip.add(next.id);
+        this.zapLine(from.x, from.y, next.x, next.y);
+        this.hitEnemy(next, 32 * st.dmgMult, { angle: Math.atan2(next.y - from.y, next.x - from.x), kind: "chain", x: next.x, y: next.y, knock: 60, noChain: true });
+        from = { x: next.x, y: next.y };
+      }
+    }
+    if (st.promotion) {
+      this.killsForPromotion++;
+      if (this.killsForPromotion >= 15) {
+        this.killsForPromotion = 0;
+        const gift = GameState.rollSlots(["common"], "combat")[0];
+        if (gift) {
+          GameState.addPerk(gift.id);
+          this.ui.banner("PROMOTED!", `Free upgrade: ${gift.name}`, "#d8a93b", 2.2);
+          this.audio.play("levelup", { vol: 0.6 });
+        }
       }
     }
     if (st.nuke) {
@@ -962,11 +1104,11 @@ export class GameScene extends Phaser.Scene {
 
   private marketCrash() {
     const p = this.player;
-    this.fx.text(p.x, p.y - 60, "MARKET CRASH!", { color: "#ffcf3f", size: 30, pop: true, dur: 1.4 });
+    this.fx.text(p.x, p.y - 60, "MARKET CRASH!", { color: "#e9c25a", size: 30, pop: true, dur: 1.4 });
     this.audio.play("boom", { vol: 0.8 });
     this.fx.shake(0.8);
-    this.ui.flash("#ffcf3f", 300, 0.45);
-    const ring = this.add.circle(p.x, p.y, 20).setStrokeStyle(10, 0xffcf3f, 0.9).setDepth(DEPTH.FX);
+    this.ui.flash("#e9c25a", 300, 0.45);
+    const ring = this.add.circle(p.x, p.y, 20).setStrokeStyle(10, 0xe9c25a, 0.9).setDepth(DEPTH.FX);
     this.tweens.add({ targets: ring, radius: 560, alpha: 0, duration: 520, onComplete: () => ring.destroy() });
     for (const e of [...this.enemies]) {
       if (!e.hostile || e.dead) continue;
@@ -979,13 +1121,13 @@ export class GameScene extends Phaser.Scene {
   trapKill(x: number, y: number) {
     if (this.phase !== "downsizing") return;
     GameState.bank += 1;
-    this.fx.text(x, y - 44, "TRAP KILL +1s", { color: "#7dffb0", size: 14, dur: 0.9 });
+    this.fx.text(x, y - 44, "TRAP KILL +1s", { color: "#9fd3a8", size: 14, dur: 0.9 });
   }
 
   explosion(x: number, y: number, radius: number, dmg: number, opts: { friendly: boolean; small?: boolean; skip?: Enemy; fromCopier?: boolean }) {
     const hm = GameState.stats.hazardMult;
     const small = !!opts.small;
-    this.fx.light(x, y, 0xffa040, radius / 26, small ? 0.18 : 0.35);
+    this.fx.light(x, y, 0xd98a3a, radius / 26, small ? 0.18 : 0.35);
     this.fx.burst("fire", x, y, small ? 8 : 30);
     this.fx.burst("ember", x, y, small ? 4 : 18);
     this.fx.burst("smoke", x, y, small ? 2 : 10);
@@ -1003,10 +1145,7 @@ export class GameScene extends Phaser.Scene {
       const f = 1 - 0.5 * Math.sqrt(d2) / radius;
       this.hitEnemy(e, dmg * f * (opts.fromCopier ? hm : 1), { angle: Math.atan2(e.y - y, e.x - x), kind: "explosion", x: e.x, y: e.y, knock: small ? 160 : 420, silent: small });
     }
-    if (!opts.friendly) {
-      const p = this.player;
-      if ((p.x - x) ** 2 + (p.y - y) ** 2 < (radius * 0.6) ** 2) p.damage(2, x, y, "explosion");
-    }
+    // Explosions, fire and live water only ever hurt coworkers: traps are the boss's tools.
     this.hazards.igniteRadius(x, y, radius * 0.6, small ? 0 : 1.2);
     // Shatter nearby glass and rattle barricades / other explosive copiers.
     const r = Math.ceil(radius / TILE);
@@ -1016,9 +1155,7 @@ export class GameScene extends Phaser.Scene {
       if (((tx + 0.5) * TILE - x) ** 2 + ((ty + 0.5) * TILE - y) ** 2 < d2max) this.damageGlass(tx, ty, small ? 1 : 3);
     }
     if (!small) {
-      for (const b of [...this.stations.barricades]) {
-        if ((b.door.x - x) ** 2 + (b.door.y - y) ** 2 < d2max) this.stations.damageBarricade(b, 80);
-      }
+      this.smashWalls(x, y, radius * 0.42);
       for (const s of this.stations.list) {
         if (s.hot && !s.wrecked && (s.x - x) ** 2 + (s.y - y) ** 2 < d2max * 1.2) this.time.delayedCall(160, () => this.stations.detonate(s));
       }
@@ -1033,6 +1170,63 @@ export class GameScene extends Phaser.Scene {
         c.spin += rand(-14, 14);
       }
     }
+  }
+
+  private tipsShown = new Set<string>();
+  /** Shows a gameplay tip the first time something happens in a run. */
+  tipOnce(key: string, text: string, color = "#e9c25a") {
+    if (this.tipsShown.has(key)) return;
+    this.tipsShown.add(key);
+    this.ui.toast(text, color, 5);
+  }
+
+  /** Which room/hall a world point is in (-1 = inside a wall). */
+  zoneAt(x: number, y: number): number {
+    const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+    if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return -1;
+    return this.map.zoneGrid[ty * MAP_W + tx];
+  }
+
+  /** Breaks every drywall tile within radius of a point. Returns how many came down. */
+  smashWalls(x: number, y: number, radius: number): number {
+    let n = 0;
+    const r = Math.ceil(radius / TILE) + 1;
+    const cx = Math.floor(x / TILE), cy = Math.floor(y / TILE);
+    for (let ty = cy - r; ty <= cy + r; ty++) {
+      for (let tx = cx - r; tx <= cx + r; tx++) {
+        if (this.world.tile(tx, ty) !== Tile.DRYWALL) continue;
+        const nx = clamp(x, tx * TILE, (tx + 1) * TILE), ny = clamp(y, ty * TILE, (ty + 1) * TILE);
+        if ((nx - x) ** 2 + (ny - y) ** 2 > radius * radius) continue;
+        if (this.world.damageWall(tx, ty, 99)) { this.onWallBroken(tx, ty); n++; }
+      }
+    }
+    if (n) {
+      this.fx.shake(0.5);
+      this.audio.play("wood_heavy", { vol: 0.8, minGap: 80 });
+      this.audio.play("crunch", { vol: 0.6, minGap: 80 });
+      this.fx.text(x, y - 60, "CRASH!", { color: "#e9c25a", size: 26, pop: true, dur: 0.9 });
+      this.ui.initMinimap(this.map, this.world);
+      this.flowTile = -1;
+    }
+    return n;
+  }
+
+  private onWallBroken(tx: number, ty: number) {
+    // The hole takes the floor of whichever room it opened into.
+    let mat = Mat.HALL as number;
+    for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+      const m = this.map.mats[(ty + dy) * MAP_W + (tx + dx)];
+      if (m && this.world.tile(tx + dx, ty + dy) === Tile.FLOOR) { mat = m; break; }
+    }
+    this.map.mats[ty * MAP_W + tx] = mat;
+    const variants = FLOOR_INDEX[mat] ?? FLOOR_INDEX[1];
+    this.wallLayer.removeTileAt(tx, ty);
+    this.floorLayer.putTileAt(variants[(tx * 7 + ty * 13) % variants.length], tx, ty);
+    if (this.world.tile(tx, ty - 1) !== Tile.FLOOR) this.placeWallTile(tx, ty - 1);
+    const x = (tx + 0.5) * TILE, y = (ty + 0.5) * TILE;
+    this.fx.burst("smoke", x, y, 8);
+    this.fx.burst("pixel", x, y, 22, 0xe8dcc6);
+    this.fx.decal(x, y, "rubble", { scale: 1, alpha: 0.95 });
   }
 
   damageGlass(tx: number, ty: number, amount: number) {
@@ -1054,11 +1248,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   onColliderShot(c: Collider, dmg: number, friendly: boolean, x: number, y: number) {
-    if (c.kind === "barricade") {
-      if (!friendly) this.stations.damageBarricade(c.ref as Barricade, dmg * 6);
-      else this.fx.burst("pixel", x, y, 3, 0xc8955b);
-      return;
-    }
     const f = c.ref as FurnObj | undefined;
     if (!f) return;
     const st = this.stations.list.find((s) => s.furn === f);
@@ -1069,20 +1258,9 @@ export class GameScene extends Phaser.Scene {
     if (friendly && chance(0.3)) this.fx.burst("pixel", x, y, 3, 0xd8d2c4);
   }
 
-  barricadeNear(x: number, y: number, r: number): Barricade | null {
-    for (const b of this.stations.barricades) {
-      const cx = clamp(x, b.collider.x0, b.collider.x1), cy = clamp(y, b.collider.y0, b.collider.y1);
-      if ((cx - x) ** 2 + (cy - y) ** 2 < r * r) return b;
-    }
-    return null;
-  }
-
-  damageBarricade(b: Barricade, dmg: number) {
-    this.stations.damageBarricade(b, dmg);
-  }
-
   onPlayerHurt() {
     const st = GameState.stats;
+    if (st.panic) this.shockwave(this.player.x, this.player.y, 200 + st.panic * 40, 18 * st.panic * st.dmgMult, 1.1, 0xff3355, "PANIC!");
     if (st.bulletTime && GameState.hp <= 2 && GameState.hp > 0 && this.bulletTimeCd <= 0) {
       this.bulletTimeCd = 20;
       this.fx.slowmo(0.4, 3);
@@ -1096,8 +1274,8 @@ export class GameScene extends Phaser.Scene {
 
   onRevive() {
     const p = this.player;
-    this.fx.text(p.x, p.y - 60, "GOLDEN PARACHUTE!", { color: "#ffcf3f", size: 28, pop: true, dur: 2 });
-    this.ui.flash("#ffcf3f", 600, 0.7);
+    this.fx.text(p.x, p.y - 60, "GOLDEN PARACHUTE!", { color: "#e9c25a", size: 28, pop: true, dur: 2 });
+    this.ui.flash("#e9c25a", 600, 0.7);
     this.fx.slowmo(0.3, 1.2);
     this.audio.voice("level_up", 0.9);
     this.audio.play("upgrade", { vol: 0.7 });
@@ -1109,10 +1287,66 @@ export class GameScene extends Phaser.Scene {
   }
 
   bossIncoming() {
-    this.ui.banner("THE CONSULTANT", "has been brought in to 'optimize headcount'", "#ffcf3f", 3);
+    this.ui.banner("THE CONSULTANT", "has been brought in to 'optimize headcount'", "#e9c25a", 3);
     this.audio.play("alert", { vol: 0.8 });
     this.audio.voice("final_round", 0.9);
     this.fx.shake(0.5);
+  }
+
+  /** A ring blast from (x, y): damages, knocks back and stuns coworkers (never the player). */
+  shockwave(x: number, y: number, radius: number, dmg: number, stun: number, color: number, label?: string) {
+    const ring = this.add.circle(x, y, 18).setStrokeStyle(8, color, 0.95).setDepth(DEPTH.FX);
+    this.tweens.add({ targets: ring, radius, alpha: 0, duration: 380, ease: "Cubic.easeOut", onComplete: () => ring.destroy() });
+    this.fx.light(x, y, color, radius / 40, 0.2);
+    this.fx.shake(0.18);
+    this.audio.play("boom", { vol: 0.35, rate: 1.6, minGap: 120 });
+    if (label) this.fx.text(x, y - 56, label, { color: Phaser.Display.Color.IntegerToColor(color).rgba, size: 18, pop: true, dur: 0.8 });
+    for (const e of [...this.enemies]) {
+      if (e.dead || !e.hostile) continue;
+      const d = Math.hypot(e.x - x, e.y - y);
+      if (d > radius) continue;
+      e.stun = Math.max(e.stun, stun);
+      this.hitEnemy(e, dmg, { angle: Math.atan2(e.y - y, e.x - x), kind: "nuke", x: e.x, y: e.y, knock: 420 * (1 - d / radius) + 120, silent: dmg <= 0 });
+    }
+  }
+
+  private zapLine(x0: number, y0: number, x1: number, y1: number) {
+    const pts: number[] = [x0, y0];
+    for (let s = 1; s < 6; s++) {
+      const t = s / 6;
+      pts.push(lerp(x0, x1, t) + rand(-12, 12), lerp(y0, y1, t) + rand(-12, 12));
+    }
+    pts.push(x1, y1);
+    this.chainLines.push({ pts, life: 0.16 });
+  }
+
+  /** Office Drone: hovers behind the player and staples the nearest coworker it can see. */
+  private updateDrones(dt: number) {
+    const n = this.phase === "downsizing" ? GameState.stats.drone : 0;
+    while (this.drones.length < n) {
+      const img = this.add.image(this.player.x, this.player.y, "drone").setDepth(DEPTH.PROJECTILE - 2);
+      this.drones.push({ img, x: this.player.x, y: this.player.y, cd: rand(0.2, 0.6), bob: rand(0, 6) });
+    }
+    while (this.drones.length > n) this.drones.pop()!.img.destroy();
+    const p = this.player;
+    this.drones.forEach((d, k) => {
+      const a = -Math.PI / 2 + (k - (n - 1) / 2) * 0.9 + Math.sin(this.time.now / 900 + k) * 0.25;
+      const tx = p.x + Math.cos(a) * 64, ty = p.y + Math.sin(a) * 64 - 18;
+      d.x = damp(d.x, tx, 6, dt);
+      d.y = damp(d.y, ty, 6, dt);
+      d.bob += dt * 6;
+      d.img.setPosition(d.x, d.y + Math.sin(d.bob) * 4);
+      d.cd -= dt;
+      if (d.cd > 0) return;
+      const target = this.nearestEnemy(d.x, d.y, 560);
+      if (!target || !this.world.los(d.x, d.y, target.x, target.y)) { d.cd = 0.2; return; }
+      d.cd = 0.62 / GameState.stats.fireRateMult;
+      const ang = Math.atan2(target.y - d.y, target.x - d.x);
+      const pr = this.projectiles.firePlayer("staple", d.x, d.y, ang);
+      pr.dmg *= 0.75;
+      d.img.setRotation(ang);
+      this.audio.play("staple", { vol: 0.14, rate: 1.6, minGap: 40 });
+    });
   }
 
   // ================================================================ laser
@@ -1123,6 +1357,7 @@ export class GameScene extends Phaser.Scene {
     for (let k = 1; k <= st.multishot; k++) offsets.push(k % 2 ? 0.09 * Math.ceil(k / 2) : -0.09 * Math.ceil(k / 2));
     this.laserSfx -= dt;
     if (this.laserSfx <= 0) { this.laserSfx = 0.16; this.audio.play("laser", { vol: 0.16, rate: 1.4, jitter: 0.05, minGap: 100 }); }
+    const prisms: { x: number; y: number; a: number; skip: number }[] = [];
     for (const off of offsets) {
       const mult = off === 0 ? 1 : 0.5;
       let ox = x, oy = y, a = angle + off, remaining = 1150, bounces = st.bounces, pierce = st.pierce;
@@ -1148,7 +1383,9 @@ export class GameScene extends Phaser.Scene {
             if (chance(0.3)) this.fx.burst("spark", ex, ey, 2, 0xffffff);
             break;
           }
-          this.laserDamage(h.e, dps * mult * dt, a);
+          const far = st.sniper && Math.hypot(h.e.x - x, h.e.y - y) > 380 ? 2 : 1;
+          this.laserDamage(h.e, dps * mult * far * dt, a);
+          if (st.prism && off === 0) prisms.push({ x: ox + ca * h.t, y: oy + sa * h.t, a, skip: h.e.id });
           if (pierce-- <= 0) { ex = ox + ca * h.t; ey = oy + sa * h.t; stopped = true; break; }
         }
         segs.push([ox, oy, ex, ey]);
@@ -1171,6 +1408,25 @@ export class GameScene extends Phaser.Scene {
         break;
       }
       this.drawLaser(segs, mult);
+    }
+    // Prism Pointer: each enemy the main beam touches throws two split beams.
+    for (const pz of prisms.slice(0, 2)) {
+      for (const side of [-1, 1]) {
+        const a2 = pz.a + side * (0.55 - st.prism * 0.08);
+        const ray = this.world.raycast(pz.x, pz.y, a2, 460, 8);
+        let ex = ray.x, ey = ray.y;
+        const ca = Math.cos(a2), sa = Math.sin(a2);
+        for (const e of this.enemies) {
+          if (e.dead || !e.hostile || e.id === pz.skip) continue;
+          const rx = e.x - pz.x, ry = e.y - pz.y;
+          const t = rx * ca + ry * sa;
+          if (t < 0 || t > ray.dist || Math.abs(rx * sa - ry * ca) > e.r + 5) continue;
+          this.laserDamage(e, dps * 0.5 * st.prism * dt, a2);
+          ex = pz.x + ca * t; ey = pz.y + sa * t;
+          break;
+        }
+        this.drawLaser([[pz.x, pz.y, ex, ey]], 0.6);
+      }
     }
   }
 
@@ -1264,7 +1520,7 @@ export class GameScene extends Phaser.Scene {
           if ((e.x - c.x) ** 2 + (e.y - c.y) ** 2 > (e.r + 17) ** 2) continue;
           const ang = Math.atan2(c.vy, c.vx);
           e.stun = Math.max(e.stun, 0.7);
-          this.fx.text(e.x, e.y - 40, "STRIKE!", { color: "#4fd1ff", size: 16, pop: true, dur: 0.7 });
+          this.fx.text(e.x, e.y - 40, "STRIKE!", { color: "#6aa3b4", size: 16, pop: true, dur: 0.7 });
           this.audio.play("hit_heavy", { vol: 0.45, minGap: 60 });
           this.hitEnemy(e, (8 + speed * 0.03) * GameState.stats.dmgMult, { angle: ang, kind: "chair", x: e.x, y: e.y, knock: speed * 0.8 });
           c.vx *= 0.45; c.vy *= 0.45;
@@ -1346,30 +1602,62 @@ export class GameScene extends Phaser.Scene {
     this.flashlight.setAlpha(torch).setPosition(this.player.x, this.player.y);
   }
 
+  private hudT = 0;
+  private hpGfx!: Phaser.GameObjects.Graphics;
+  private hpBars: number[] = [];
+  private flowTurn = 0;
+
+  /** Enemies queue their health bars; one Graphics draws them all after the update. */
+  queueHpBar(x: number, y: number, w: number, frac: number, color: number) {
+    this.hpBars.push(x, y, w, frac, color);
+  }
+
+  private drawHpBars() {
+    const g = this.hpGfx;
+    g.clear();
+    const b = this.hpBars;
+    for (let i = 0; i < b.length; i += 5) {
+      g.fillStyle(0x1c1d21, 0.75).fillRect(b[i] - 1, b[i + 1], b[i + 2] + 2, 7);
+      g.fillStyle(b[i + 4], 1).fillRect(b[i], b[i + 1] + 1, b[i + 2] * b[i + 3], 5);
+    }
+    b.length = 0;
+  }
   private updateHud(dt: number) {
+    const p = this.player;
+    const st = GameState.stats;
+    this.hudT -= dt;
+    if (this.hudT <= 0) {
+      this.hudT = 0.06;
+      this.updateHudSlow();
+    }
+    this.updateHudFast(dt);
+  }
+
+  private updateHudSlow() {
     const p = this.player;
     const st = GameState.stats;
     this.ui.setDay(GameState.day, GameState.bank);
     this.ui.setHearts(GameState.hp, st.maxHp, p.tempHp);
     this.ui.setWeapons({
-      armed: p.armed, active: p.weapon, coffee: GameState.unlocked.coffee, laser: GameState.unlocked.laser,
-      mag: p.mag, maxMag: p.maxMag, reloading: p.reloading > 0, cups: p.cups, maxCups: p.maxCups, battery: p.battery, maxBattery: p.maxBattery
+      armed: p.armed,
+      active: p.weapon,
+      slots: WEAPONS.filter((w) => p.weaponUnlocked(w)).map((w) => ({ id: w, key: WEAPONS.indexOf(w) + 1, name: WEAPON_DEFS[w].name, color: WEAPON_DEFS[w].color, ...p.ammoFor(w) }))
     });
     this.ui.setDodge(p.dodgeCharges, st.dodgeCharges);
-    this.ui.setPerks(GameState.stacks);
+    this.ui.setPerks(GameState.stacks, PERK_BY_ID);
     this.ui.setBag(p.shredBag, p.dropPaper);
     if (this.phase === "crunch") {
-      this.ui.setClock(formatClock(Math.max(0, this.crunchLeft), this.crunchTotal), Math.max(0, this.crunchLeft), this.crunchLeft < 20);
-      const items = this.dayCfg.chores.map((c) => ({ label: CHORE_INFO[c].label, room: CHORE_INFO[c].room, done: this.choresDone.has(c), tag: this.choreKinds[c] ? KIND_TAG[this.choreKinds[c]!] : undefined }));
+      this.ui.setClock(formatClock(Math.max(0, this.crunchLeft), this.crunchTotal), Math.max(0, this.crunchLeft), this.crunchLeft < 20, this.crunchTotal);
+      const items = this.dayCfg.chores.map((c) => ({ label: CHORE_INFO[c].label, room: CHORE_INFO[c].room, done: this.choresDone.has(c) }));
       this.ui.setDusk(1 - Math.max(0, this.crunchLeft) / this.crunchTotal);
-      const opt: string[] = [];
-      if (!GameState.unlocked.coffee && !this.dayCfg.chores.includes("coffee")) opt.push("Fix the coffee machine to unlock Hot Coffee");
-      if (!GameState.unlocked.laser && !this.dayCfg.chores.includes("presentation")) opt.push("Optional: prep the board deck (Conference Room) to unlock the Laser Pointer");
-      this.ui.setChores(items, opt.join("<br>"));
+      this.ui.setChores(items, "");
       this.ui.setClockout(this.allChoresDone(), this.crunchLeft);
     }
     if (this.phase === "downsizing") this.ui.setQuota(this.fired, this.quota);
+  }
 
+  private updateHudFast(dt: number) {
+    const p = this.player;
     this.arrowTimer -= dt;
     if (this.arrowTimer <= 0) {
       this.arrowTimer = 1 / 30;
@@ -1382,12 +1670,12 @@ export class GameScene extends Phaser.Scene {
       if (this.phase === "crunch") {
         for (const s of this.stations.list) {
           const chore = s.marker && s.marker.visible;
-          if (chore) dots.push({ x: s.x, y: s.y, color: "#ffd75a", r: 3.2 });
+          if (chore) dots.push({ x: s.x, y: s.y, color: "#e9c25a", r: 3.2 });
         }
       }
       for (const e of this.enemies) {
         if (e.dead) continue;
-        dots.push({ x: e.x, y: e.y, color: e.ally ? "#52d17c" : e.hostile ? (e.def.boss ? "#ffcf3f" : "#ff3b55") : "#8b95a7", r: e.def.boss ? 4 : 2 });
+        dots.push({ x: e.x, y: e.y, color: e.ally ? "#4b9a63" : e.hostile ? (e.def.boss ? "#e9c25a" : "#c4382c") : "#8b95a7", r: e.def.boss ? 4 : 2 });
       }
       dots.push({ x: p.x, y: p.y, color: "#ffffff", r: 3.5 });
       this.ui.drawMinimap(dots);
@@ -1409,12 +1697,12 @@ export class GameScene extends Phaser.Scene {
       out.push({ x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry, angle: a, color, icon });
     };
     if (this.phase === "crunch") {
-      for (const s of this.stations.list) if (s.marker && s.marker.visible) add(s.x, s.y, "#ffd75a", "exclamation");
+      for (const s of this.stations.list) if (s.marker && s.marker.visible) add(s.x, s.y, "#e9c25a", "exclamation");
     } else if (this.phase === "downsizing") {
       const p = this.player;
       const list = this.enemies.filter((e) => e.hostile && !e.dead)
         .sort((a, b) => ((a.x - p.x) ** 2 + (a.y - p.y) ** 2) - ((b.x - p.x) ** 2 + (b.y - p.y) ** 2)).slice(0, 10);
-      for (const e of list) add(e.x, e.y, e.def.boss ? "#ffcf3f" : "#ff3b55", e.def.boss ? "skull" : undefined);
+      for (const e of list) add(e.x, e.y, e.def.boss ? "#e9c25a" : "#c4382c", e.def.boss ? "skull" : undefined);
     }
     return out;
   }
@@ -1430,14 +1718,21 @@ export class GameScene extends Phaser.Scene {
       aimX: wp.x,
       aimY: wp.y,
       fire: ptr.leftButtonDown() && !this.paused,
+      firePressed: this.lmbPressed && !this.paused,
       dodge: P("Space") || P("ShiftLeft") || P("ShiftRight") || this.rmb,
       reload: P("KeyR"),
-      switchTo: P("Digit1") ? 0 : P("Digit2") ? 1 : P("Digit3") ? 2 : null,
+      switchTo: this.digitPressed(),
       cycle: P("KeyQ") ? 1 : this.wheel
     };
     this.rmb = false;
+    this.lmbPressed = false;
     this.wheel = 0;
     return inp;
+  }
+
+  private digitPressed(): number | null {
+    for (let k = 1; k <= 9; k++) if (this.pressed.has(`Digit${k}`) || this.pressed.has(`Numpad${k}`)) return k - 1;
+    return null;
   }
 
   private togglePause() {
@@ -1452,6 +1747,7 @@ export class GameScene extends Phaser.Scene {
         music: (v) => { this.audio.musicVolume = v; this.audio.applyVolumes(); this.audio.saveSettings(); },
         sfx: (v) => { this.audio.sfxVolume = v; this.audio.saveSettings(); },
         mute: () => { this.audio.toggleMute(); this.ui.closeScreen("pause"); this.paused = false; this.togglePause(); },
+        howto: () => this.ui.showHowTo(() => {}),
         quit: () => {
           this.ui.closeScreen("pause");
           this.paused = false;
@@ -1473,10 +1769,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private debugToFight() {
-    if (this.phase === "title") { this.ui.closeScreen("title"); this.startRun(); }
+    this.ui.skipBrief();
+    if (this.phase === "title") { this.ui.closeScreen("title"); this.startRun(); this.ui.skipBrief(); }
     if (this.phase === "crunch") this.endCrunch(true);
+    this.ui.skipBrief();
     if (this.phase === "review") { this.ui.closeScreen("review"); this.startDownsizing(); }
-    if (this.phase === "announce") this.startDownsizing();
+    if (this.phase === "announce") { this.briefing = false; this.startDownsizing(); }
   }
 
   // ================================================================ main loop
@@ -1505,7 +1803,7 @@ export class GameScene extends Phaser.Scene {
     const realDt = Math.min(deltaMs / 1000, 0.05);
     if (this.pressed.has("Escape") || this.pressed.has("KeyP")) this.togglePause();
     if (this.pressed.has("KeyM")) { this.audio.toggleMute(); this.ui.toast(this.audio.muted ? "Muted" : "Sound on", "#8b95a7", 1.2); }
-    if (this.phase === "announce" && this.pressed.has("Space")) this.skipAnnounce();
+    if (this.phase === "announce" && this.pressed.has("Space") && !this.briefing) this.skipAnnounce();
     if (this.paused) { this.pressed.clear(); return; }
 
     this.timed("fx", () => this.fx.update(realDt));
@@ -1519,12 +1817,16 @@ export class GameScene extends Phaser.Scene {
     // Flow fields follow the player.
     this.flowTimer -= dt;
     const ptile = Math.floor(this.player.y / TILE) * MAP_W + Math.floor(this.player.x / TILE);
-    if (this.phase === "downsizing" && (this.flowTimer <= 0 || (ptile !== this.flowTile && this.flowTimer < 0.28))) {
-      this.flowTimer = 0.4;
-      this.flowTile = ptile;
+    if (this.phase === "downsizing" && (this.flowTimer <= 0 || (ptile !== this.flowTile && this.flowTimer < 0.1))) {
+      // One field per tick, round-robin: no single frame pays for all of them.
+      this.flowTimer = 0.14;
+      const bossUp = !!(this.waves.boss && !this.waves.boss.dead);
+      const turn = this.flowTurn++ % (bossUp ? 3 : 2);
+      if (turn === 0) this.flowTile = ptile;
       this.timed("flow", () => {
-        this.flowNaive.compute(this.player.x, this.player.y);
-        this.flowSmart.compute(this.player.x, this.player.y);
+        if (turn === 0) this.flowNaive.compute(this.player.x, this.player.y);
+        else if (turn === 1) this.flowSmart.compute(this.player.x, this.player.y);
+        else this.flowBoss.compute(this.player.x, this.player.y);
       });
     }
 
@@ -1538,7 +1840,7 @@ export class GameScene extends Phaser.Scene {
         this.timed("downsizing", () => this.updateDownsizing(dt, inp));
         break;
       case "dayclear":
-        this.player.update(dt, { ...inp, fire: false, dodge: false });
+        this.player.update(dt, { ...inp, fire: false, firePressed: false, dodge: false });
         break;
       default:
         break;
@@ -1550,9 +1852,11 @@ export class GameScene extends Phaser.Scene {
       this.pickups.update(dt);
       this.timed("hazards", () => this.hazards.update(dt));
       this.timed("chairs", () => this.updateChairs(dt));
+      this.timed("props", () => this.props.update(dt));
     }
     this.timed("stations", () => this.stations.update(dt));
     this.updateChainLines(realDt);
+    this.drawHpBars();
     if (this.phase !== "downsizing" && this.phase !== "crunch") this.ui.setPrompt(null);
 
     this.updateCamera(realDt, inp.aimX, inp.aimY);
@@ -1567,6 +1871,14 @@ export class GameScene extends Phaser.Scene {
     if (this.sprinklerCd > 0) this.sprinklerCd -= dt;
     if (this.sprinklerT > 0) {
       this.sprinklerT -= dt;
+      // Patches of the office flood while it rains indoors.
+      for (let i = this.sprinklerFloods.length - 1; i >= 0; i--) {
+        const f = this.sprinklerFloods[i];
+        f.t -= dt;
+        if (f.t > 0) continue;
+        this.hazards.flood(f.x, f.y, f.size, 0.07);
+        this.sprinklerFloods.splice(i, 1);
+      }
       const wv = this.cameras.main.worldView;
       for (let k = 0; k < 6; k++) this.fx.burst("water", wv.x + rand(0, wv.width), wv.y + rand(0, wv.height), 1);
       // Each burning tile gets doused, leaving water behind.
@@ -1579,25 +1891,197 @@ export class GameScene extends Phaser.Scene {
       }
       return;
     }
-    if (this.sprinklerCd <= 0 && this.hazards.burningCount >= 18) {
-      this.sprinklerCd = 30;
-      this.sprinklerT = 4;
-      this.ui.banner("SPRINKLERS ACTIVATED", "Fire's out. Floor's wet. Mind the power strips.", "#4fd1ff", 2.2);
-      this.audio.play("alert", { vol: 0.6 });
-      this.audio.play("splash", { vol: 0.5 });
-      this.sprinklerAt = { x: this.player.x, y: this.player.y };
+    if (this.sprinklerCd <= 0 && this.hazards.burningCount >= 18) this.activateSprinklers("SPRINKLERS ACTIVATED", "Fire's out. Floor's wet. Mind the power strips.");
+  }
+
+  /** Ceiling sprinklers: douse the fires and leave small puddles all over the office. */
+  activateSprinklers(title: string, sub: string) {
+    this.sprinklerCd = 30;
+    this.sprinklerT = 4;
+    this.ui.banner(title, sub, "#6aa3b4", 2.2);
+    this.audio.play("alert", { vol: 0.6 });
+    this.audio.play("splash", { vol: 0.5 });
+    this.sprinklerAt = { x: this.player.x, y: this.player.y };
+    this.sprinklerFloods = [];
+    for (let k = 0; k < 16; k++) {
+      const pt = this.randomFloorPoint();
+      if (pt) this.sprinklerFloods.push({ ...pt, t: rand(0.2, 3.6), size: Math.floor(rand(3, 8)) });
     }
+    // A few right where the boss can see them.
+    for (let k = 0; k < 3; k++) {
+      const pt = this.world.nearestWalkable(this.player.x + rand(-420, 420), this.player.y + rand(-300, 300));
+      this.sprinklerFloods.push({ ...pt, t: rand(0.3, 2.5), size: Math.floor(rand(3, 6)) });
+    }
+  }
+
+  private randomFloorPoint(): { x: number; y: number } | null {
+    for (let k = 0; k < 40; k++) {
+      const tx = 1 + Math.floor(Math.random() * (MAP_W - 2)), ty = 1 + Math.floor(Math.random() * (MAP_H - 2));
+      if (this.world.walkableTile(tx, ty)) return { x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE };
+    }
+    return null;
+  }
+
+  /** Blame Game: the coworker who hit you becomes everyone's problem. */
+  makeScapegoat(e: Enemy) {
+    if (e.scapegoat > 0) { e.scapegoat = 5; return; }
+    e.scapegoat = 5;
+    this.fx.text(e.x, e.y - 50, "IT WAS THEM!", { color: "#d98a3a", size: 18, pop: true, dur: 1 });
+    this.audio.play("alert", { vol: 0.35, rate: 1.3, minGap: 300 });
+  }
+
+  /** Office Romance: a heart on the floor. Whoever steps on it is smitten for a while. */
+  dropHeart(x: number, y: number) {
+    const sprite = this.add.image(x, y, "p_heart").setDepth(DEPTH.DECAL + 5);
+    this.tweens.add({ targets: sprite, scale: { from: 0.4, to: 1 }, duration: 260, ease: "Back.easeOut" });
+    this.hearts.push({ x, y, life: 8, sprite });
+  }
+
+  private updateHearts(dt: number) {
+    for (let i = this.hearts.length - 1; i >= 0; i--) {
+      const h = this.hearts[i];
+      h.life -= dt;
+      h.sprite.setScale(1 + Math.sin(this.time.now / 160) * 0.08).setAlpha(Math.min(1, h.life));
+      const e = this.enemies.find((o) => !o.dead && o.hostile && !o.def.boss && (o.x - h.x) ** 2 + (o.y - h.y) ** 2 < (o.r + 16) ** 2);
+      if (e) {
+        e.makeAlly(10);
+        e.charmed = true;
+        this.fx.text(e.x, e.y - 46, "SMITTEN!", { color: "#cf6a4c", size: 18, pop: true, dur: 1 });
+        this.fx.burst("confetti", e.x, e.y, 10, 0xcf6a4c);
+        this.audio.play("powerup", { vol: 0.35, rate: 1.4 });
+      }
+      if (e || h.life <= 0) {
+        h.sprite.destroy();
+        this.hearts.splice(i, 1);
+      }
+    }
+  }
+
+  /** Black Hole Binder: drag every coworker nearby into one tidy pile. */
+  vortex(x: number, y: number) {
+    this.vortices.push({ x, y, t: 2, a: 0 });
+    this.audio.play("powerdown", { vol: 0.45, rate: 1.5 });
+    this.fx.light(x, y, 0x6b6f9a, 2.6, 0.3);
+  }
+
+  private updateVortices(dt: number) {
+    for (let i = this.vortices.length - 1; i >= 0; i--) {
+      const v = this.vortices[i];
+      v.t -= dt;
+      v.a += dt * 7;
+      for (const e of this.enemies) {
+        if (e.dead || !e.hostile || e.def.boss) continue;
+        const dx = v.x - e.x, dy = v.y - e.y, d = Math.hypot(dx, dy);
+        if (d > 300 || d < 6) continue;
+        const pull = (80 + 260 * (1 - d / 300)) * dt;
+        const pos = { x: e.x, y: e.y };
+        this.world.moveCircle(pos, e.r, (dx / d) * pull, (dy / d) * pull);
+        e.x = pos.x;
+        e.y = pos.y;
+      }
+      if (Math.random() < dt * 20) this.fx.burst("pixel", v.x + rand(-60, 60), v.y + rand(-60, 60), 1, 0x6b6f9a);
+      if (v.t <= 0) {
+        this.fx.burst("star", v.x, v.y, 10, 0x6b6f9a);
+        this.vortices.splice(i, 1);
+      }
+    }
+  }
+
+  /** Live Wire: an overloaded power strip arcs to the nearest coworker. */
+  teslaZap(x: number, y: number, e: Enemy) {
+    this.zapLine(x, y - 6, e.x, e.y);
+    this.audio.play("zap", { vol: 0.3, minGap: 80 });
+    this.fx.burst("zap", e.x, e.y, 6);
+    if (this.hitEnemy(e, 30 * GameState.stats.hazardMult, { angle: Math.atan2(e.y - y, e.x - x), kind: "zap", x: e.x, y: e.y, knock: 60 })) this.trapKill(e.x, e.y);
+  }
+
+  /** Keyboard: a wide melee arc that also swats enemy shots back at the nearest coworker. */
+  keyboardSwing(x: number, y: number, a: number, hot: boolean) {
+    const st = GameState.stats;
+    const reach = 92 * Math.sqrt(st.sizeMult) + 14;
+    const arc = 1.05;
+    let hits = 0;
+    for (const e of [...this.enemies]) {
+      if (e.dead || !e.hostile) continue;
+      const dx = e.x - x, dy = e.y - y;
+      if (Math.hypot(dx, dy) > reach + e.r) continue;
+      const ea = Math.atan2(dy, dx);
+      if (Math.abs(angleDiff(a, ea)) > arc) continue;
+      hits++;
+      // A keyboard to the face knocks a riot shield aside.
+      e.stun = Math.max(e.stun, e.def.shield ? 0.9 : 0.3);
+      this.hitEnemy(e, 40 * st.dmgMult * (hot ? 2 : 1), { angle: ea, kind: "keyboard", x: e.x, y: e.y, knock: 520 });
+    }
+    let deflected = 0;
+    for (const p of this.projectiles.list) {
+      if (!p.active || p.friendly) continue;
+      const dx = p.x - x, dy = p.y - y;
+      if (Math.hypot(dx, dy) > reach + 24 || Math.abs(angleDiff(a, Math.atan2(dy, dx))) > arc + 0.25) continue;
+      const t = this.nearestEnemy(p.x, p.y, 700);
+      this.projectiles.deflect(p, t ? Math.atan2(t.y - p.y, t.x - p.x) : a);
+      deflected++;
+    }
+    this.swings.push({ x, y, a, life: 0.13 });
+    this.audio.play(hits ? "hit_heavy" : "dodge", { vol: hits ? 0.5 : 0.35, rate: hits ? 1 : 1.5, minGap: 60 });
+    if (hits) { this.fx.shake(0.18); this.fx.stop(30); }
+    if (deflected) {
+      this.audio.play("ping", { vol: 0.5, rate: 0.8 });
+      this.fx.text(x + Math.cos(a) * 60, y + Math.sin(a) * 60 - 20, pick(["CTRL+Z!", "RETURN TO SENDER", "DENIED", "ESC!"]), { color: "#6aa3b4", size: 16, pop: true, dur: 0.7 });
+    }
+    for (let k = 0; k < (hits ? 3 : 1); k++) {
+      this.fx.text(x + Math.cos(a) * rand(30, 80), y + Math.sin(a) * rand(30, 80), pick(["Q", "W", "E", "R", "T", "Y", "ESC", "F5", "ALT"]), { color: "#ffffff", size: 12, dur: 0.5, rise: 60 });
+    }
+  }
+
+  /** Toner Bomb landing: a blast that cracks drywall, then a choking cloud that slows everyone in it. */
+  tonerBlast(x: number, y: number) {
+    const st = GameState.stats;
+    const r = 120 * Math.sqrt(st.sizeMult);
+    this.explosion(x, y, r, 70 * st.dmgMult, { friendly: true });
+    this.fx.burst("smoke", x, y, 14, 0x2a2a35);
+    for (const e of this.enemies) {
+      if (!e.dead && e.hostile && (e.x - x) ** 2 + (e.y - y) ** 2 < (r * 1.3) ** 2) e.slow = Math.max(e.slow, 2.5);
+    }
+    this.fx.decal(x, y, "fx_scorch_02", { scale: r / 260, alpha: 0.8, tint: 0x15151f });
   }
 
   private updateChainLines(dt: number) {
     const g = this.chainGfx;
     g.clear();
+    for (const v of this.vortices) {
+      const k = Math.min(1, v.t);
+      for (let r = 0; r < 3; r++) {
+        g.lineStyle(5 - r, 0x6b6f9a, 0.55 * k);
+        g.beginPath();
+        g.arc(v.x, v.y, 40 + r * 34, v.a + r * 1.7, v.a + r * 1.7 + 2.2, false);
+        g.strokePath();
+      }
+    }
+    if (this.player.dugIn) {
+      g.lineStyle(4, 0x6aa3b4, 0.5 + 0.2 * Math.sin(this.time.now / 140));
+      g.strokeCircle(this.player.x, this.player.y + 4, 30);
+    }
+    for (let i = this.swings.length - 1; i >= 0; i--) {
+      const s = this.swings[i];
+      s.life -= dt;
+      if (s.life <= 0) { this.swings.splice(i, 1); continue; }
+      const k = s.life / 0.13;
+      const sweep = (1 - k) * 0.9;
+      g.lineStyle(14, 0xffffff, 0.35 * k);
+      g.beginPath();
+      g.arc(s.x, s.y, 74, s.a - 1.05 + sweep, s.a + 1.05 * k, false);
+      g.strokePath();
+      g.lineStyle(5, 0x6aa3b4, 0.9 * k);
+      g.beginPath();
+      g.arc(s.x, s.y, 86, s.a - 1.05 + sweep, s.a + 1.05 * k, false);
+      g.strokePath();
+    }
     for (let i = this.chainLines.length - 1; i >= 0; i--) {
       const l = this.chainLines[i];
       l.life -= dt;
       if (l.life <= 0) { this.chainLines.splice(i, 1); continue; }
       const a = l.life / 0.14;
-      g.lineStyle(6, 0x4fd1ff, 0.25 * a);
+      g.lineStyle(6, 0x6aa3b4, 0.25 * a);
       g.beginPath();
       g.moveTo(l.pts[0], l.pts[1]);
       for (let k = 2; k < l.pts.length; k += 2) g.lineTo(l.pts[k], l.pts[k + 1]);

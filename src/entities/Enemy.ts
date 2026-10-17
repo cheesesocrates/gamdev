@@ -9,6 +9,8 @@ import type { GameScene } from "../scenes/GameScene";
 
 let NEXT_ID = 1;
 
+const RUSH_BARKS = ["NOW!", "CHARGE!", "GET THE BOSS!", "FOR THE PENSION!", "OVERTIME THIS!", "RELOADING! GO!"];
+
 type Mode = "npc" | "hostile" | "ally";
 
 export class Enemy {
@@ -31,7 +33,6 @@ export class Enemy {
   sprite: Phaser.GameObjects.Image;
   shadow: Phaser.GameObjects.Image;
   shield?: Phaser.GameObjects.Image;
-  hpBar?: Phaser.GameObjects.Graphics;
   private bubble?: Phaser.GameObjects.Text;
   private bubbleTimer = 0;
 
@@ -44,6 +45,8 @@ export class Enemy {
   slow = 0;
   shockCd = 0;
   hitFlash = 0;
+  /** Seconds of "soaked" left: slower, fireproof, and double damage from shocks. */
+  soaked = 0;
   fireTickCd = 0;
 
   // AI
@@ -62,6 +65,23 @@ export class Enemy {
   private chargeCd = 5;
   private charging = 0;
   private chargeWind = 0;
+  // Runner tactics: advance -> duck behind cover when spotted -> rush once close.
+  private tactic: "advance" | "cover" | "rush" = "advance";
+  private coverX = 0;
+  private coverY = 0;
+  private coverWait = 0;
+  private coverCd = rand(0, 0.5);
+  private covers = 0;
+  private rushLeft = 0;
+  /** Sticky Notes stuck on so far. */
+  notes = 0;
+  /** Blame Game: seconds this coworker is the office scapegoat (everyone turns on them). */
+  scapegoat = 0;
+  /** Office Romance: an ally only until the infatuation wears off. */
+  charmed = false;
+  private spreadT = 0;
+  private panicT = 0;
+  private panicA = 0;
   allyLife = 0;
   spawnGrace = 0;
 
@@ -91,7 +111,7 @@ export class Enemy {
     this.sprite = g.add.image(x, y, g.textures.exists(texKey) ? texKey : `char_${spr}`).setOrigin(0.42, 0.5).setScale(this.def.scale * CHAR_SCALE);
     this.sprite.setData("tex", `char_${spr}`);
     if (this.def.tint) this.sprite.setTint(this.def.tint);
-    if (mode === "ally") this.sprite.setTint(0x9dffb0);
+    if (mode === "ally") this.sprite.setTint(0x9fd3a8);
     if (this.def.shield && mode !== "npc") this.addShield();
   }
 
@@ -128,19 +148,25 @@ export class Enemy {
     this.vy *= Math.pow(0.001, dt);
     this.lurkLeft -= dt;
     const d = Math.hypot(g.player.x - this.x, g.player.y - this.y);
-    if (d < 340 || this.lurkLeft <= 0) this.wake();
+    const zone = g.zoneAt(this.x, this.y);
+    const sameRoom = zone >= 0 && zone === g.zoneAt(g.player.x, g.player.y);
+    if (sameRoom || d < 300 || this.lurkLeft <= 0 || this.hp < this.maxHp) {
+      this.wake();
+      // Ambush: everyone waiting in this room springs at once.
+      for (const o of g.enemies) if (o !== this && o.lurking && g.zoneAt(o.x, o.y) === zone) o.wake();
+    }
   }
 
   makeAlly(life: number) {
     this.mode = "ally";
     this.allyLife = life;
-    this.sprite.setTexture(this.sprite.getData("tex")).setTint(0x9dffb0);
+    this.sprite.setTexture(this.sprite.getData("tex")).setTint(0x9fd3a8);
   }
 
   say(text: string, dur = 2.2, color = "#1d2129") {
     if (!this.bubble) {
       this.bubble = this.g.add.text(this.x, this.y - 40, "", {
-        fontFamily: "Inter, sans-serif", fontSize: "13px", fontStyle: "bold", color,
+        fontFamily: "'Jersey 10', 'Courier New', monospace", fontSize: "20px", fontStyle: "normal", color,
         backgroundColor: "#ffffffee", padding: { x: 6, y: 3 }, align: "center", wordWrap: { width: 190 }
       }).setOrigin(0.5, 1).setDepth(DEPTH.WORLD_UI - 1).setResolution(2);
     }
@@ -158,6 +184,7 @@ export class Enemy {
 
   takeDamage(amount: number, angle: number, knock: number) {
     if (this.dead) return false;
+    if (this.def.shield && this.slip > 0) amount *= 1.5;
     this.hp -= amount;
     this.hitFlash = 0.08;
     const kb = knock * (this.def.boss ? 0.15 : this.type === "hr" ? 0.35 : 1);
@@ -176,7 +203,13 @@ export class Enemy {
     if (this.slow > 0) this.slow -= dt;
     if (this.shockCd > 0) this.shockCd -= dt;
     if (this.hitFlash > 0) this.hitFlash -= dt;
+    if (this.soaked > 0) {
+      this.soaked -= dt;
+      this.burn = Math.min(this.burn, 0.2);
+      if (Math.random() < dt * 5) this.g.fx.burst("water", this.x + rand(-8, 8), this.y + 4, 1);
+    }
     if (this.spawnGrace > 0) this.spawnGrace -= dt;
+    if (this.scapegoat > 0) this.scapegoat -= dt;
     if (this.bubbleTimer > 0) {
       this.bubbleTimer -= dt;
       if (this.bubbleTimer <= 0) this.bubble?.setVisible(false);
@@ -191,6 +224,17 @@ export class Enemy {
         g.fx.burst("fire", this.x + rand(-8, 8), this.y + rand(-8, 8), 1);
         // Burning coworkers ignite the paper they run through.
         g.hazards.igniteAt(this.x, this.y);
+      }
+      // Hostile Work Environment: the panic (and the fire) spreads.
+      if (GameState.stats.hostileEnv && this.mode === "hostile" && (this.spreadT -= dt) <= 0) {
+        this.spreadT = 0.4;
+        for (const o of g.enemies) {
+          if (o === this || o.dead || !o.hostile || o.burn > 0 || o.soaked > 0) continue;
+          if ((o.x - this.x) ** 2 + (o.y - this.y) ** 2 > 95 * 95) continue;
+          o.burn = 2.2;
+          o.burnDps = Math.max(o.burnDps, this.burnDps);
+          g.fx.burst("fire", o.x, o.y, 4);
+        }
       }
     }
 
@@ -222,7 +266,7 @@ export class Enemy {
   }
 
   private steer(dx: number, dy: number, speed: number, dt: number, accel = 9) {
-    const slowMult = this.slow > 0 ? 0.55 : 1;
+    const slowMult = (this.slow > 0 ? 0.55 : 1) * (this.soaked > 0 ? 0.72 : 1);
     const tvx = dx * speed * slowMult, tvy = dy * speed * slowMult;
     const k = Math.min(1, accel * dt);
     this.vx += (tvx - this.vx) * k;
@@ -279,7 +323,7 @@ export class Enemy {
 
     // Movement direction: straight at the target if visible, else follow the flow field.
     let mvx = 0, mvy = 0;
-    const field = this.def.smart ? g.flowSmart : g.flowNaive;
+    const field = this.def.boss ? g.flowBoss : this.def.smart ? g.flowSmart : g.flowNaive;
     const goStraight = this.hasLos && d < 520 && target === pl;
     if (goStraight || target !== pl) {
       mvx = dx / d; mvy = dy / d;
@@ -288,15 +332,33 @@ export class Enemy {
       if (dir) { mvx = dir.x; mvy = dir.y; } else { mvx = dx / d; mvy = dy / d; }
     }
 
+    // Hostile Work Environment: burning coworkers run around screaming.
+    if (this.burn > 0 && GameState.stats.hostileEnv && !this.def.boss) {
+      this.panicT -= dt;
+      if (this.panicT <= 0) { this.panicT = rand(0.25, 0.5); this.panicA = rand(-Math.PI, Math.PI); }
+      mvx = Math.cos(this.panicA);
+      mvy = Math.sin(this.panicA);
+    }
+
     let speed = this.speed;
     const R = this.def.ranged;
+    // Runners don't sprint into a firing line: they duck behind desks, creep up, then rush.
+    if (!R && !this.def.boss && !this.def.shield && target === pl) {
+      const t = this.runnerTactics(dt, d);
+      if (t) { mvx = t.x; mvy = t.y; speed *= t.speed; }
+    }
+    // Shooters hold their range instead of charging in.
+    if (R && target === pl) {
+      if (this.hasLos && d > R.keepDist[1]) speed *= 0.75;
+      else if (!this.hasLos && d < R.keepDist[0]) speed *= 0.5;
+    }
     if (R && this.hasLos && target === pl) {
       // Keep a comfortable firing distance and strafe.
       const [near, far] = R.keepDist;
       this.strafeTimer -= dt;
       if (this.strafeTimer <= 0) { this.strafeTimer = rand(1.2, 2.8); this.strafeDir *= -1; }
       const px = -dy / d * this.strafeDir, py = dx / d * this.strafeDir;
-      if (d < near) { mvx = -dx / d * 0.8 + px * 0.6; mvy = -dy / d * 0.8 + py * 0.6; }
+      if (d < near) { mvx = -dx / d * 0.85 + px * 0.55; mvy = -dy / d * 0.85 + py * 0.55; speed *= 1.1; }
       else if (d < far) { mvx = px * 0.9 + dx / d * 0.15; mvy = py * 0.9 + dy / d * 0.15; speed *= 0.7; }
       this.rangedCd -= dt;
       if (this.rangedCd <= 0 && d < R.range) {
@@ -314,7 +376,7 @@ export class Enemy {
       this.bossSummonCd -= dt;
       if (this.bossSummonCd <= 0) {
         this.bossSummonCd = rand(8, 11);
-        this.say("BRING IN THE INTERNS!", 1.6, "#ffd75a");
+        this.say("BRING IN THE INTERNS!", 1.6, "#e9c25a");
         g.audio.play("alert", { vol: 0.4 });
         for (let k = 0; k < 2 + Math.floor(g.dayCfg.day / 5); k++) {
           const a = rand(0, Math.PI * 2);
@@ -324,13 +386,16 @@ export class Enemy {
           g.fx.burst("confetti", p.x, p.y, 8);
         }
       }
+      // Bosses don't use doors.
+      if (this.charging > 0) g.smashWalls(this.x + this.vx * 0.06, this.y + this.vy * 0.06, this.r + 22);
+      else if (this.stuckTimer > 0.35) g.smashWalls(this.x + mvx * (this.r + 12), this.y + mvy * (this.r + 12), this.r + 16);
       if (this.charging > 0) {
         this.charging -= dt;
         this.facing = Math.atan2(this.vy, this.vx);
         if (chance(0.5)) g.fx.burst("pixel", this.x, this.y, 2, 0xffd7a8);
         if (d < this.r + pl.r + 8 && this.attackCd <= 0) {
           this.attackCd = 1;
-          pl.damage(2, this.x, this.y, "charge");
+          pl.damage(2, this.x, this.y, "charge", this);
         }
         this.attackCd -= dt;
         return;
@@ -367,9 +432,9 @@ export class Enemy {
       this.pulseCd -= dt;
       if (this.pulseCd <= 0 && d < 330 && this.hasLos && target === pl) {
         this.pulseCd = rand(4, 6);
-        this.say("ATTENTION ALL STAFF!", 1.2, "#ffd75a");
+        this.say("ATTENTION ALL STAFF!", 1.2, "#e9c25a");
         g.audio.play("megaphone", { vol: 0.5 });
-        for (let k = -1; k <= 1; k++) g.projectiles.fireEnemy("wave", this.x, this.y, this.facing + k * 0.22, 360, 1);
+        for (let k = -1; k <= 1; k++) g.projectiles.fireEnemy("wave", this.x, this.y, this.facing + k * 0.22, 360, 1, this);
       }
     }
 
@@ -378,7 +443,6 @@ export class Enemy {
     mvx += sep.x * 1.4; mvy += sep.y * 1.4;
     if (this.stuckTimer > 0.6) {
       mvx += rand(-1, 1); mvy += rand(-1, 1);
-      this.attackBarricade(dt);
     }
     const ml = Math.hypot(mvx, mvy);
     if (ml > 0.001) { mvx /= ml; mvy /= ml; }
@@ -390,9 +454,10 @@ export class Enemy {
     if (d < reach && this.attackCd <= 0) {
       this.attackCd = this.def.boss ? 1.0 : 0.85;
       if (target === pl) {
-        pl.damage(this.def.melee, this.x, this.y, "melee");
+        pl.damage(this.def.melee, this.x, this.y, "melee", this);
       } else if (target instanceof Enemy) {
-        target.takeDamage(12 * g.dayCfg.hpMult, wantFacing, 140);
+        // Interns get a shove; a scapegoat gets the whole office's frustration.
+        target.takeDamage(target.ally ? 12 * g.dayCfg.hpMult : target.maxHp * 0.2, wantFacing, 140);
         if (target.hp <= 0) g.killEnemy(target, false);
       }
       this.vx += Math.cos(wantFacing) * 120;
@@ -402,19 +467,90 @@ export class Enemy {
     this.barkCd -= dt;
     if (this.barkCd <= 0 && d < 600) {
       this.barkCd = rand(6, 14);
-      if (g.canBark()) this.say(pick(HOSTILE_BARKS), 1.6, "#ff6b6b");
+      if (g.canBark()) this.say(pick(HOSTILE_BARKS), 1.6, "#d0574a");
     }
   }
 
+  private runnerTactics(dt: number, d: number): { x: number; y: number; speed: number } | null {
+    const g = this.g, pl = g.player;
+    const toPl = { x: (pl.x - this.x) / d, y: (pl.y - this.y) / d };
+    const rushDist = 220 + this.r * 2;
+    this.coverCd -= dt;
+    if (this.tactic === "rush") {
+      this.rushLeft -= dt;
+      if (this.rushLeft > 0 || this.hasLos) return this.hasLos ? { ...toPl, speed: 1.3 } : null;
+      this.tactic = "advance";
+    }
+    const exposed = this.hasLos && d < 950;
+    // Rush when close, when the boss is reloading or looking the other way, or after enough hiding.
+    const opening = this.hasLos && d < 520 && (pl.reloading > 0 || Math.abs(pl.aimAngleTo(this.x, this.y)) > 1.3);
+    if (exposed && (d < rushDist || opening || this.covers >= 3)) {
+      this.tactic = "rush";
+      this.rushLeft = 1.6;
+      this.covers = 0;
+      if (chance(0.3) && g.canBark()) this.say(pick(RUSH_BARKS), 1.2, "#d0574a");
+      return { ...toPl, speed: 1.3 };
+    }
+    if (this.tactic === "cover") {
+      // Cover got blown (the boss moved): look for another spot.
+      if (this.coverCd <= 0 && g.world.los(pl.x, pl.y, this.coverX, this.coverY)) {
+        this.coverCd = 0.5;
+        if (!this.findCover()) { this.tactic = "advance"; return null; }
+      }
+      const cd = Math.hypot(this.coverX - this.x, this.coverY - this.y);
+      if (cd > 14) return { x: (this.coverX - this.x) / cd, y: (this.coverY - this.y) / cd, speed: 1.2 };
+      // Hunkered down: wait a beat, then creep up on the boss.
+      this.coverWait -= dt;
+      if (this.coverWait <= 0) this.tactic = "advance";
+      return { x: 0, y: 0, speed: 0 };
+    }
+    if (exposed && this.coverCd <= 0) {
+      this.coverCd = 0.6;
+      if (this.findCover()) {
+        this.tactic = "cover";
+        this.covers++;
+        this.coverWait = rand(0.5, 1.4);
+        const cd = Math.hypot(this.coverX - this.x, this.coverY - this.y) || 1;
+        return { x: (this.coverX - this.x) / cd, y: (this.coverY - this.y) / cd, speed: 1.2 };
+      }
+    }
+    return null;
+  }
+
+  /** A nearby floor tile the boss can't see, no further from them than we are now. */
+  private findCover(): boolean {
+    const g = this.g, pl = g.player;
+    const here = g.flowSmart.distAt(this.x, this.y);
+    let best = Infinity, bx = 0, by = 0;
+    for (let k = 0; k < 16; k++) {
+      const a = rand(0, Math.PI * 2), rr = rand(1.1, 4.5) * TILE;
+      const tx = Math.floor((this.x + Math.cos(a) * rr) / TILE), ty = Math.floor((this.y + Math.sin(a) * rr) / TILE);
+      if (!g.world.walkableTile(tx, ty)) continue;
+      const cx = (tx + 0.5) * TILE, cy = (ty + 0.5) * TILE;
+      const fd = g.flowSmart.distAt(cx, cy);
+      if (!isFinite(fd) || (isFinite(here) && fd > here + 15)) continue;
+      if (Math.hypot(cx - pl.x, cy - pl.y) < 170) continue;
+      if (g.world.los(pl.x, pl.y, cx, cy)) continue;
+      if (!g.world.walkLos(this.x, this.y, cx, cy, this.r)) continue;
+      const score = fd + Math.hypot(cx - this.x, cy - this.y) * 0.08;
+      if (score < best) { best = score; bx = cx; by = cy; }
+    }
+    if (best === Infinity) return false;
+    this.coverX = bx;
+    this.coverY = by;
+    return true;
+  }
+
   private pickTarget(): { x: number; y: number } {
-    // Hostiles chase allies that get close; otherwise the player.
+    // Hostiles chase allies that get close (and any scapegoat nearby); otherwise the player.
     const g = this.g;
     let best: Enemy | null = null;
-    let bd = 200 * 200;
+    let bd = Infinity;
     for (const a of g.enemies) {
-      if (!a.ally || a.dead) continue;
+      if (a === this || a.dead || !(a.ally || a.scapegoat > 0)) continue;
+      const range = a.scapegoat > 0 ? 420 : 200;
       const d2 = (a.x - this.x) ** 2 + (a.y - this.y) ** 2;
-      if (d2 < bd) { bd = d2; best = a; }
+      if (d2 < range * range && d2 < bd) { bd = d2; best = a; }
     }
     return best ?? g.player;
   }
@@ -429,32 +565,28 @@ export class Enemy {
     const base = Math.atan2(ay - this.y, ax - this.x);
     for (let k = 0; k < R.count; k++) {
       const off = (k - (R.count - 1) / 2) * R.spread + rand(-0.04, 0.04);
-      g.projectiles.fireEnemy(R.kind, this.x + Math.cos(base) * 20, this.y + Math.sin(base) * 20, base + off, R.speed, R.dmg);
+      g.projectiles.fireEnemy(R.kind, this.x + Math.cos(base) * 20, this.y + Math.sin(base) * 20, base + off, R.speed, R.dmg, this);
     }
     g.audio.play(R.kind === "bolt" ? "laser" : "dodge", { vol: R.kind === "bolt" ? 0.25 : 0.2, rate: R.kind === "bolt" ? 1.5 : 1.6, minGap: 80 });
     this.vx -= Math.cos(base) * 50;
     this.vy -= Math.sin(base) * 50;
   }
 
-  private attackBarricade(dt: number) {
-    const g = this.g;
-    // Find a barricade collider right next to us and chip at it.
-    const b = g.barricadeNear(this.x, this.y, this.r + 20);
-    if (b) {
-      if (this.attackCd <= 0) {
-        this.attackCd = 0.7;
-        g.damageBarricade(b, 10 * (this.def.boss ? 6 : this.type === "hr" ? 3 : 1));
-      }
-    }
-  }
-
   // ---------------------------------------------------------------- allies
   private updateAlly(dt: number) {
     const g = this.g;
     this.allyLife -= dt;
+    if (this.allyLife <= 0 && this.charmed) {
+      // The crush wears off.
+      this.charmed = false;
+      this.mode = "hostile";
+      this.spawnGrace = 0.6;
+      g.fx.text(this.x, this.y - 40, "IT'S OVER", { color: "#cf6a4c", size: 15, pop: true });
+      return;
+    }
     if (this.allyLife <= 0) {
       g.fx.burst("confetti", this.x, this.y, 10);
-      g.fx.text(this.x, this.y - 30, "INTERNSHIP OVER", { color: "#9dffb0", size: 13 });
+      g.fx.text(this.x, this.y - 30, "INTERNSHIP OVER", { color: "#9fd3a8", size: 13 });
       this.dead = true;
       g.removeEnemy(this);
       return;
@@ -549,6 +681,10 @@ export class Enemy {
     if (this.mode === "npc") return;
     const hz = g.hazards;
     const hm = GameState.stats.hazardMult;
+    if (hz.isWater(this.x, this.y)) {
+      if (this.soaked <= 0 && chance(0.35)) g.fx.text(this.x, this.y - 30, "SOAKED", { color: "#7fd8ff", size: 13, dur: 0.6 });
+      this.soaked = 4;
+    }
     if (hz.isElectric(this.x, this.y) && this.shockCd <= 0) {
       this.shockCd = 0.9;
       this.stun = Math.max(this.stun, 1.4);
@@ -559,7 +695,11 @@ export class Enemy {
     } else if (hz.isWater(this.x, this.y) && this.slipCd <= 0 && this.slip <= 0 && !this.def.boss) {
       const sp = Math.hypot(this.vx, this.vy);
       if (sp > 60) {
-        this.slip = 1.0 * (GameState.stats.hazardMult > 1 ? 1.5 : 1);
+        this.slip = (this.def.shield ? 2.4 : 1.0) * (GameState.stats.hazardMult > 1 ? 1.5 : 1);
+        if (this.def.shield) {
+          g.fx.text(this.x, this.y - 44, "SHIELD DOWN!", { color: "#e9c25a", size: 17, pop: true, dur: 0.9 });
+          g.tipOnce("shieldslip", "Slipped! A fallen HR Director takes extra damage. Hit them now!", "#e9c25a");
+        }
         this.slipCd = 2.6;
         this.vx *= 1.7; this.vy *= 1.7;
         g.fx.burst("water", this.x, this.y, 8);
@@ -568,7 +708,7 @@ export class Enemy {
         if (g.hitEnemy(this, 14 * hm, { angle: 0, kind: "slip", x: this.x, y: this.y, knock: 0, silent: true })) { g.trapKill(this.x, this.y); return; }
       }
     }
-    if (hz.isFire(this.x, this.y)) {
+    if (hz.isFire(this.x, this.y) && this.soaked <= 0) {
       this.burn = Math.max(this.burn, 2.0);
       this.burnDps = Math.max(this.burnDps, 42 * hm);
     }
@@ -588,11 +728,13 @@ export class Enemy {
     if (this.hitFlash > 0) this.sprite.setTintFill(0xffffff);
     else if (this.burn > 0) this.sprite.setTint(0xff9a6a);
     else if (this.stun > 0 || this.slip > 0) this.sprite.setTint(0x9fd8ff);
+    else if (this.soaked > 0) this.sprite.setTint(0xb8e4ff);
     else if (this.slow > 0) this.sprite.setTint(0xc9a27a);
-    else if (this.mode === "ally") this.sprite.setTint(0x9dffb0);
+    else if (this.mode === "ally") this.sprite.setTint(this.charmed ? 0xe8a38f : 0x9fd3a8);
+    else if (this.scapegoat > 0) this.sprite.setTint(Math.floor(g.time.now / 110) % 2 ? 0xd98a3a : 0xeedcbc);
     else if (this.def.tint) this.sprite.setTint(this.def.tint);
     else this.sprite.clearTint();
-    if (this.chargeWind > 0.05) this.sprite.setTintFill(Math.floor(g.time.now / 70) % 2 ? 0xffffff : 0xff3b55);
+    if (this.chargeWind > 0.05) this.sprite.setTintFill(Math.floor(g.time.now / 70) % 2 ? 0xffffff : 0xc4382c);
     if (this.windup > 0.05) this.sprite.setScale(this.def.scale * CHAR_SCALE * (1 + Math.sin(g.time.now / 30) * 0.04));
     else this.sprite.setScale(this.def.scale * CHAR_SCALE);
     this.shadow.setPosition(this.x, this.y + 8).setDepth(this.y - 30);
@@ -604,16 +746,11 @@ export class Enemy {
       this.shield.setPosition(sx, sy).setRotation(this.facing).setDepth(this.y + 6).setAlpha(down ? 0.35 : 1);
     }
 
-    // HP bar for anything damaged (or bosses).
-    const showBar = this.mode !== "npc" && (this.hp < this.maxHp || this.def.boss);
-    if (showBar) {
-      if (!this.hpBar) this.hpBar = g.add.graphics().setDepth(DEPTH.WORLD_UI - 2);
+    // HP bar for anything damaged (or bosses): all bars share one Graphics, drawn by the scene.
+    if (this.mode !== "npc" && (this.hp < this.maxHp || this.def.boss)) {
       const w = this.def.boss ? 90 : 36;
-      const frac = Math.max(0, this.hp / this.maxHp);
-      this.hpBar.clear();
-      this.hpBar.fillStyle(0x000000, 0.55).fillRect(this.x - w / 2 - 1, this.y - this.r - 22, w + 2, 6);
-      this.hpBar.fillStyle(this.ally ? 0x52d17c : this.def.boss ? 0xffcf3f : 0xe6304a, 1).fillRect(this.x - w / 2, this.y - this.r - 21, w * frac, 4);
-    } else if (this.hpBar) this.hpBar.clear();
+      g.queueHpBar(this.x - w / 2, this.y - this.r - 22, w, Math.max(0, this.hp / this.maxHp), this.ally ? 0x4b9a63 : this.def.boss ? 0xe9c25a : 0xe6304a);
+    }
 
     if (this.bubble && this.bubble.visible) this.bubble.setPosition(this.x, this.y - this.r - 26);
     void dt;
@@ -623,7 +760,6 @@ export class Enemy {
     this.sprite.destroy();
     this.shadow.destroy();
     this.shield?.destroy();
-    this.hpBar?.destroy();
     this.bubble?.destroy();
   }
 }

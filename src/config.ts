@@ -1,8 +1,8 @@
 // Shared constants.
 
 export const TILE = 64;
-export const MAP_W = 56;
-export const MAP_H = 42;
+export const MAP_W = 64;
+export const MAP_H = 46;
 export const WORLD_W = MAP_W * TILE;
 export const WORLD_H = MAP_H * TILE;
 

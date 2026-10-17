@@ -45,7 +45,7 @@ export const HOSTILE_BARKS = [
 
 export const FIRED_WORDS = ["FIRED!", "LAID OFF", "DOWNSIZED", "TERMINATED", "RESTRUCTURED", "LET GO", "REDUNDANT", "OFFBOARDED"];
 
-export const COMBO_WORDS = ["", "", "DOUBLE FIRE", "TRIPLE FIRE", "MASS LAYOFF", "RESTRUCTURE", "HOSTILE TAKEOVER", "MARKET CRASH", "BANKRUPTCY"];
+export const COMBO_WORDS = ["", "", "DOUBLE FIRE", "TRIPLE FIRE", "MASS LAYOFF", "RESTRUCTURE", "RATHER DIE", "MARKET CRASH", "BANKRUPTCY"];
 
 export const ELEVATOR_LINES = ["*ding*", "Going up!", "Reporting for duty!", "HR sent me.", "Is this the 5th floor?"];
 
