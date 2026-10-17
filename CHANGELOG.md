@@ -84,6 +84,11 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Fix (Gameplay): a boss day could end without the boss if the quota was met before he'd stepped out of the lift.
   The day now waits for the boss to turn up and be fired.
 - Fix (UI): every boss was announced as "THE CONSULTANT HAS BEEN LET GO" when fired; it now uses the boss's name.
+- UI: **cheat sheet** for debugging. On the Performance Review, type the Konami code (up up down down left right left
+  right B A) and a "CONFIDENTIAL" sheet opens: every upgrade with its logo, rarity and description and +/- buttons
+  (rarity / chore / owned filters and a search box), every gun with an Owned box, and a God Mode switch. Whatever you
+  sign there sticks for the rest of the run. Esc, CLOSE or a click outside closes it; typing in it never reaches the
+  game (no accidental mute). Guns you already own can't be bought again, and maxed offers show as MAXED.
 - Fix (Gameplay): coworkers' melee reach against another coworker (a Blame Game scapegoat, an ally) now measures
   from that coworker's edge, so a big one standing right there can be hit.
 

@@ -187,6 +187,20 @@ class GameStateClass {
     this.hp = Math.min(this.hp, this.stats.maxHp);
   }
 
+  /** Takes one stack back off (the cheat sheet's minus button). */
+  removePerk(id: string) {
+    const n = this.stack(id);
+    if (n <= 0) return;
+    if (n > 1) this.stacks[id] = n - 1;
+    else delete this.stacks[id];
+    if (id === "parachute" && n === 1) this.revivesLeft = 0;
+    const alive = this.hp >= 1;
+    this.stats = this.computeStats();
+    // Fewer hearts: clamp to the new max, but never all the way down to zero.
+    this.hp = Math.min(this.hp, this.stats.maxHp);
+    if (alive) this.hp = Math.max(1, this.hp);
+  }
+
   /** Weapon upgrades stay hidden until the player owns that weapon. */
   available(p: PerkDef) {
     if (!this.canTake(p)) return false;

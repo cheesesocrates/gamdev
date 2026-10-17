@@ -772,6 +772,198 @@ try {
       }
     }
   }
+
+  // The Konami code on the Performance Review opens the cheat sheet; what it hands out sticks for the run.
+  if (scenario === "cheats") {
+    const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "KeyB", "KeyA"];
+    const typeKeys = async (keys) => { for (const k of keys) { await page.keyboard.press(k); await sleep(35); } };
+    const isOpen = () => ev(() => !!document.querySelector("#cheats"));
+    const click = async (sel) => { await page.click(sel); await sleep(140); };
+    const visible = () => ev(() => [...document.querySelectorAll(".ch-perk:not(.hidden)")].map((r) => r.dataset.id));
+    const snap = () => ev(() => {
+      const h = window.__HT;
+      return { stacks: { ...h.state.stacks }, hp: h.state.hp, maxHp: h.state.stats.maxHp, revives: h.state.revivesLeft, bank: h.state.bank, owned: Object.keys(h.state.unlocked).filter((w) => h.state.unlocked[w]), god: h.scene.godMode, muted: h.scene.audio.muted };
+    });
+    // Window key listeners via the DevTools protocol: opening and closing the sheet must leave the count unchanged.
+    const cdp = await page.createCDPSession();
+    const keyListeners = async () => {
+      const { result } = await cdp.send("Runtime.evaluate", { expression: "window" });
+      const { listeners } = await cdp.send("DOMDebugger.getEventListeners", { objectId: result.objectId });
+      await cdp.send("Runtime.releaseObject", { objectId: result.objectId });
+      return listeners.filter((l) => l.type === "keydown" || l.type === "keyup").length;
+    };
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    await typeKeys(KONAMI);
+    await sleep(200);
+    console.log("konami during crunch -> open:", await isOpen());
+    await ev(() => { const h = window.__HT; h.state.bank = 80; h.scene.endCrunch(true); });
+    await sleep(900);
+    await page.keyboard.press("Space");
+    await sleep(1600);
+    console.log("review up:", await ev(() => !!document.querySelector("#review")), "phase:", await ev(() => window.__HT.phase()));
+    const baseListeners = await keyListeners();
+    // A wrong key starts over; a held key's auto-repeat is not a second press.
+    await typeKeys(["ArrowUp", "ArrowUp", "ArrowDown", "KeyX", ...KONAMI.slice(3)]);
+    console.log("wrong key -> open:", await isOpen());
+    await page.keyboard.down("ArrowUp"); await page.keyboard.down("ArrowUp"); await page.keyboard.up("ArrowUp");
+    await typeKeys(KONAMI.slice(2));
+    console.log("auto-repeat -> open:", await isOpen());
+    // A stray Up mid-code restarts it, and Up Up Up still counts.
+    await typeKeys(["ArrowUp", "ArrowUp", "ArrowDown", "ArrowUp", "ArrowUp", "ArrowUp", ...KONAMI.slice(2)]);
+    console.log("konami -> open:", await isOpen(), "| search focused:", await ev(() => !!document.activeElement?.matches(".ch-search input")), "| review inert:", await ev(() => document.querySelector("#review").inert), "| key listeners", baseListeners, "->", await keyListeners());
+    await sleep(700);
+    await shot("k01-cheats");
+    console.log("before", JSON.stringify(await snap()));
+    await click('.ch-perk[data-id="hp"] .inc');
+    await click('.ch-perk[data-id="dmg"] .inc');
+    await click('.ch-perk[data-id="dmg"] .inc');
+    await click('.ch-perk[data-id="dmg"] .dec');
+    await click('.ch-perk[data-id="parachute"] .inc');
+    await click('.ch-perk[data-id="parachute"] .inc');
+    await click('.ch-perk[data-id="flex"] .inc');
+    // Minus takes the heart (clamped to the new max) and the parachute's revive back off; plus puts them back.
+    await click('.ch-perk[data-id="hp"] .dec');
+    await click('.ch-perk[data-id="parachute"] .dec');
+    console.log("minus hp + parachute", JSON.stringify(await snap()));
+    await click('.ch-perk[data-id="hp"] .inc');
+    await click('.ch-perk[data-id="parachute"] .inc');
+    // The coffee, the laser and one of today's gun offers (which must then be off the table in the review).
+    const offered = await ev(() => window.__HT.scene.reviewGuns.map((g) => g.id));
+    for (const w of new Set(["laser", "coffee", offered[0]])) await click(`.ch-gun[data-w="${w}"]`);
+    await click(".ch-god");
+    console.log("after clicks", JSON.stringify(await snap()));
+    console.log("sheet shows", JSON.stringify(await ev(() => ({
+      dmg: document.querySelector('.ch-perk[data-id="dmg"] .ch-n').textContent,
+      parachute: document.querySelector('.ch-perk[data-id="parachute"] .ch-n').textContent,
+      parachutePlusDisabled: document.querySelector('.ch-perk[data-id="parachute"] .inc').disabled,
+      glassMinusDisabled: document.querySelector('.ch-perk[data-id="glass"] .dec').disabled,
+      laserPerkTag: document.querySelector('.ch-perk[data-id="laser"] .need').className,
+      irishTag: document.querySelector('.ch-perk[data-id="irish"] .need').className,
+      god: document.querySelector(".ch-god").getAttribute("aria-checked"),
+      hearts: document.querySelector(".ch-hp").textContent
+    }))));
+    // Max out the review's first upgrade offer here: buying it in the review afterwards must not take money.
+    const maxedOffer = await ev(() => window.__HT.scene.reviewOffers[0].perk.id);
+    const incOpen = () => ev((id) => !document.querySelector(`.ch-perk[data-id="${id}"] .inc`).disabled, maxedOffer);
+    for (let i = 0; i < 6 && (await incOpen()); i++) await click(`.ch-perk[data-id="${maxedOffer}"] .inc`);
+    console.log("maxed", maxedOffer, "->", await ev((id) => document.querySelector(`.ch-perk[data-id="${id}"] .ch-n`).textContent, maxedOffer));
+    // Typing in the search box (M mutes the game, P pauses it) must never reach the game.
+    await page.click(".ch-search input");
+    await page.keyboard.type("mic", { delay: 60 });
+    await sleep(300);
+    console.log("search 'mic' ->", JSON.stringify(await visible()), await ev(() => document.querySelector(".ch-count").textContent));
+    console.log("typed m: muted", (await snap()).muted, "| Phaser keys held:", await ev(() => window.__HT.scene.input.keyboard.keys.filter((k) => k && k.isDown).map((k) => k.keyCode)));
+    await shot("k02-cheats-search");
+    await page.click(".ch-search input", { clickCount: 3 });
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type("pa");
+    await sleep(200);
+    console.log("search 'pa' ->", (await visible()).length, "rows");
+    await page.click(".ch-search input", { clickCount: 3 });
+    await page.keyboard.press("Backspace");
+    await click('.ch-chip[data-f="owned"]');
+    console.log("OWNED chip ->", JSON.stringify(await visible()));
+    await click('.ch-chip[data-f="chore"]');
+    console.log("CHORE chip ->", (await visible()).length, "rows", await ev(() => document.querySelector(".ch-count").textContent));
+    await shot("k03-cheats-chore");
+    await click('.ch-chip[data-f="all"]');
+    // Smaller windows: the sheet re-flows (one scrolling page below 860 px) and still fits.
+    for (const [w, hgt] of [[1024, 768], [820, 560]]) {
+      await page.setViewport({ width: w, height: hgt });
+      await sleep(600);
+      console.log(`${w}x${hgt}`, JSON.stringify(await ev(() => {
+        const p = document.querySelector(".ch-panel").getBoundingClientRect(), list = document.querySelector(".ch-list");
+        return { panel: [Math.round(p.width), Math.round(p.height)], fits: p.left >= 0 && p.right <= innerWidth && p.bottom <= innerHeight, perkColumns: getComputedStyle(list).gridTemplateColumns.split(" ").length };
+      })));
+      await shot(`k03-cheats-${w}`);
+    }
+    await page.setViewport({ width: 1280, height: 720 });
+    await sleep(600);
+    await page.keyboard.press("Escape");
+    await sleep(400);
+    console.log("Esc -> open:", await isOpen(), "| review inert:", await ev(() => document.querySelector("#review")?.inert), "| key listeners:", await keyListeners(), "| Phaser keys held:", await ev(() => window.__HT.scene.input.keyboard.keys.filter((k) => k && k.isDown).length));
+    console.log("review cards", JSON.stringify(await ev(() => { const s = window.__HT.scene; return [...document.querySelectorAll("#review .card")].map((c) => ({ id: s.reviewOffers[Number(c.dataset.i)].perk.id, cls: c.className.replace("card ", ""), own: c.querySelector(".c-own")?.textContent })); })));
+    console.log("review guns", JSON.stringify(await ev(() => { const h = window.__HT; return [...document.querySelectorAll("#review .gun")].map((g) => { const id = h.scene.reviewGuns[Number(g.dataset.g)].id; return { id, owned: h.state.unlocked[id], cls: g.className }; }); })));
+    console.log("click the maxed offer", JSON.stringify(await ev((id) => {
+      const h = window.__HT, s = h.scene, i = s.reviewOffers.findIndex((o) => o.perk.id === id), before = h.state.bank;
+      document.querySelector(`#review .card[data-i="${i}"]`)?.click();
+      return { id, bank: [before, h.state.bank], sold: s.reviewOffers[i].sold };
+    }, maxedOffer)));
+    await shot("k04-review-after");
+    // Reopen: clicks inside the guard are ignored (done in the same tick so a slow machine can't miss the window),
+    // a drag out of (or into) the panel is not a backdrop click, a real one closes.
+    console.log("clicks inside the guard", JSON.stringify(await ev(() => {
+      const h = window.__HT;
+      h.cheats();
+      const r = document.querySelector("#cheats"), before = h.state.stack("speed");
+      r.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      r.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+      r.click();
+      r.querySelector('.ch-perk[data-id="speed"] .inc').click();
+      return { open: !!document.querySelector("#cheats"), speed: [before, h.state.stack("speed")] };
+    })));
+    await sleep(450);
+    for (const [from, to] of [[[700, 400], [1268, 12]], [[1268, 12], [700, 400]]]) {
+      await page.mouse.move(...from);
+      await page.mouse.down();
+      await page.mouse.move(...to, { steps: 4 });
+      await page.mouse.up();
+      await sleep(100);
+    }
+    console.log("drag out of / into the panel -> open:", await isOpen(), "| stacks unchanged:", JSON.stringify(await ev(() => window.__HT.state.stacks)));
+    await page.mouse.click(1268, 12);
+    await sleep(200);
+    console.log("backdrop click -> open:", await isOpen());
+    await typeKeys(KONAMI);
+    await sleep(500);
+    console.log("konami again -> open:", await isOpen());
+    await page.click('#cheats [data-act="close"]');
+    await sleep(300);
+    console.log("CLOSE button -> open:", await isOpen());
+    for (let i = 0; i < 6; i++) { await ev(() => window.__HT.cheats()); await sleep(50); await page.keyboard.press("Escape"); await sleep(50); }
+    console.log("6x open/close -> open:", await isOpen(), "| sheets in DOM:", await ev(() => document.querySelectorAll("#cheats").length), "| key listeners", baseListeners, "->", await keyListeners());
+    // Buying in the review still works afterwards.
+    await sleep(300);
+    console.log("buy after cheats", JSON.stringify(await ev(() => {
+      const h = window.__HT, s = h.scene;
+      const i = s.reviewOffers.findIndex((o) => !o.sold && h.state.canTake(o.perk) && h.state.bank >= o.perk.cost);
+      const before = h.state.bank;
+      document.querySelector(`#review .card[data-i="${i}"]`)?.click();
+      return { id: i >= 0 ? s.reviewOffers[i].perk.id : null, bank: [before, h.state.bank], sold: i >= 0 ? s.reviewOffers[i].sold : null };
+    })));
+    await sleep(300);
+    // Click both gun offers: the one already owned is locked, the other one sells.
+    console.log("buy a gun after cheats", JSON.stringify(await ev(() => {
+      const h = window.__HT, s = h.scene;
+      const before = h.state.bank;
+      document.querySelectorAll("#review .gun").forEach((g) => g.click());
+      return { guns: s.reviewGuns.map((g) => `${g.id}${g.sold ? " SOLD" : ""}`), bank: [before, h.state.bank] };
+    })));
+    await sleep(700);
+    await shot("k05-review-bought");
+    await page.click("#go");
+    await sleep(1200);
+    console.log("BACK TO WORK -> phase:", await ev(() => window.__HT.phase()));
+    await ev(() => window.__HT.toFight());
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(1500);
+    console.log("in the fight", JSON.stringify(await ev(() => {
+      const h = window.__HT, s = h.scene;
+      const hp = h.state.hp;
+      s.player.invuln = 0;
+      const died = s.player.damage(4, s.player.x + 20, s.player.y);
+      return { phase: s.phase, hit: [hp, h.state.hp], died, slots: [...document.querySelectorAll(".hb-slot")].map((e) => e.dataset.w), dmgMult: h.state.stats.dmgMult };
+    })));
+    await typeKeys(KONAMI);
+    await sleep(200);
+    await ev(() => window.__HT.cheats());
+    console.log("konami / __HT.cheats() in the fight -> open:", await isOpen());
+    console.log("persisted", JSON.stringify(await snap()));
+    await shot("k06-fight");
+  }
 } catch (e) {
   console.log("SCRIPT ERROR", e);
   await shot("zz-error").catch(() => {});

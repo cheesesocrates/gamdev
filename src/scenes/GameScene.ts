@@ -27,6 +27,7 @@ import { PerkDef } from "../data/perks";
 import { FLOOR_INDEX, WALL_INDEX } from "./BootScene";
 import { ArrowMark, UI } from "../ui/UI";
 import { MiniHandle, MiniSfx, openMini } from "../ui/Minigames";
+import { bindKonami, showCheats } from "../ui/Cheats";
 import { WEAPONS, WEAPON_DEFS, WeaponId } from "../data/weapons";
 import { angleDiff, chance, clamp, damp, formatClock, lerp, pick, rand, shuffle, weightedPick } from "../util/math";
 
@@ -253,6 +254,8 @@ export class GameScene extends Phaser.Scene {
     this.game.events.on(Phaser.Core.Events.BLUR, () => {
       if ((this.phase === "crunch" || this.phase === "downsizing") && !this.paused) this.togglePause();
     });
+    // Up up down down left right left right B A on the Performance Review opens the cheat sheet.
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, bindKonami(() => this.phase === "review", () => this.openCheats()));
 
     (window as unknown as Record<string, unknown>).__HT = {
       scene: this,
@@ -261,6 +264,7 @@ export class GameScene extends Phaser.Scene {
       toFight: () => this.debugToFight(),
       give: (id: string, n = 1) => { for (let i = 0; i < n; i++) GameState.addPerk(id); },
       god: (v = true) => { this.godMode = v; },
+      cheats: () => this.openCheats(),
       killAll: () => { for (const e of [...this.enemies]) if (e.hostile) this.killEnemy(e, true); },
       day: (d: number) => { GameState.day = d; this.startDay(d); },
       phase: () => this.phase,
@@ -709,7 +713,7 @@ export class GameScene extends Phaser.Scene {
       bank: GameState.bank,
       notes: this.reviewNotes,
       offers: this.reviewOffers.map((o) => ({ ...o, stacks: GameState.stack(o.perk.id), maxed: !o.sold && !GameState.canTake(o.perk) })),
-      guns: this.reviewGuns.map((g) => ({ ...WEAPON_DEFS[g.id], sold: g.sold, locked: gunBought && !g.sold })),
+      guns: this.reviewGuns.map((g) => ({ ...WEAPON_DEFS[g.id], sold: g.sold, locked: !g.sold && (gunBought || GameState.unlocked[g.id]) })),
       healCost,
       canHeal: GameState.hp < GameState.stats.maxHp,
       rerollCost
@@ -2581,6 +2585,21 @@ export class GameScene extends Phaser.Scene {
     this.ui.skipBrief();
     if (this.phase === "review") { this.ui.closeScreen("review"); this.startDownsizing(); }
     if (this.phase === "announce") { this.briefing = false; this.startDownsizing(); }
+  }
+
+  /** Debug: the cheat sheet over the Performance Review (Konami code, or __HT.cheats()). */
+  private openCheats() {
+    if (this.phase !== "review") return;
+    showCheats(this.ui, {
+      god: () => this.godMode,
+      setGod: (v) => { this.godMode = v; },
+      onClose: () => {
+        // Keys pressed or let go under the sheet never reached the game: start from a clean slate.
+        this.input.keyboard?.resetKeys();
+        this.pressed.clear();
+        if (this.phase === "review" && document.getElementById("review")) this.renderReview();
+      }
+    });
   }
 
   // ================================================================ main loop
