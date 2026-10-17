@@ -125,6 +125,13 @@ export function spawnFurniture(scene: Phaser.Scene, world: World, key: string, x
 }
 let spawnCounter = 0;
 
+/** Swaps a furniture sprite's art (a cooler kicked over) and re-anchors it, since each sprite has its own ground point. */
+export function setFurnTexture(scene: Phaser.Scene, sprite: Phaser.GameObjects.Image, key: string) {
+  sprite.setTexture(`furn_${key}`);
+  const me = (scene.cache.json.get("furnManifest") as Record<string, ManifestEntry>)[key];
+  if (me) sprite.setOrigin(me.anchorX, me.anchorY);
+}
+
 export function destroyFurniture(world: World, f: FurnObj) {
   f.sprite.destroy();
   if (f.collider) world.removeCollider(f.collider);

@@ -97,7 +97,8 @@ export const SPECS = [
       { prim: "cyl", size: [0.12, 0.03, 0.12], color: "#2b6cb0", pos: [0, 0.68, 0] }
     ]
   },
-  { key: "cooler_tipped", scale: 1.4, rots: [0], parts: [
+  // Hand-drawn now (the kicked-over cooler with its water gushing out): `render` leaves the PNG alone.
+  { key: "cooler_tipped", handDrawn: true, scale: 1.4, rots: [0], parts: [
       { prim: "box", size: [0.24, 0.42, 0.24], color: "#e9edf2", pos: [0, 0, 0] },
       { prim: "cyl", size: [0.21, 0.26, 0.21], color: "#59b8f5", opacity: 0.75, roughness: 0.2, pos: [0.24, 0.105, 0.0], rotZ: 90 }
     ] },

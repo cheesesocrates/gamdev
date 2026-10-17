@@ -12,6 +12,9 @@ When a batch ships, the Unreleased lines move under a new version heading with t
   lose its art like that again.
 - Fix (World): power strips lie flat on the floor. They used to be depth-sorted like desks, so walking just above
   one drew it on top of you and it looked like it was floating.
+- World: new art for the kicked-over water cooler (lying on its side with the water gushing out). It is hand-drawn,
+  so `tools/render-assets.mjs render` now leaves it alone (`handDrawn` in the spec), and the sprite is re-anchored
+  when it swaps in.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.

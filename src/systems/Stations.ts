@@ -5,7 +5,7 @@ import { NPC_SABOTAGE } from "../data/lines";
 import { GameState } from "./GameState";
 import { chance, pick, rand } from "../util/math";
 import { StationDef } from "../world/OfficeMap";
-import { FurnObj, destroyFurniture, spawnFurniture } from "../world/Furniture";
+import { FurnObj, destroyFurniture, setFurnTexture, spawnFurniture } from "../world/Furniture";
 import type { GameScene } from "../scenes/GameScene";
 
 export interface Station {
@@ -345,7 +345,7 @@ export class Stations {
     if (s.used) return;
     s.used = true;
     const spr = s.furn?.sprite as Phaser.GameObjects.Image | undefined;
-    spr?.setTexture("furn_cooler_tipped");
+    if (spr) setFurnTexture(g, spr, "cooler_tipped");
     g.hazards.flood(s.x, s.y + 30, GameState.stats.bigPuddles ? 46 : 22);
     g.audio.play("splash", { vol: 0.7 });
     g.audio.play("soft_heavy", { vol: 0.5 });
