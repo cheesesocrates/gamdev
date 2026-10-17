@@ -153,6 +153,10 @@ export class Enemy {
 
   get hostile() { return this.mode === "hostile"; }
   get ally() { return this.mode === "ally"; }
+  /** A boss mid-charge: ploughs through people instead of being pushed around by them. */
+  get rampaging() { return this.charging > 0; }
+  /** How hard this body is to push around (bosses and riot shields stand their ground). */
+  get mass() { return this.def.boss ? 20 : this.def.shield ? 3 : 1 + this.r * this.r / 400; }
 
   private addShield() {
     this.shield = this.g.add.image(this.x, this.y, "shield").setScale(this.def.scale * 0.85 * CHAR_SCALE);

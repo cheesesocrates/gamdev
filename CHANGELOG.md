@@ -51,6 +51,9 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Gameplay: AI robots that walk into a puddle short out: they freeze, spark and rattle for about a second
   ("SHORT CIRCUIT!"), then blow up. The blast hurts the coworkers around them (never you, like every trap), cracks glass
   but leaves the walls standing, and counts as a trap kill. Finish one off while it's frying and it still goes bang.
+- Gameplay: coworkers can't stand inside each other or inside you any more. They push each other apart (bosses and
+  riot shields stand their ground), step out of your way, and are never shoved into a wall or a desk. A charging boss
+  still ploughs through people, and a dodge-roll still slips through a crowd.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.

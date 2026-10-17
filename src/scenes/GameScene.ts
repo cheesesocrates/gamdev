@@ -1890,6 +1890,67 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private bodyPos = { x: 0, y: 0 };
+
+  /** Shoves a body through the collision world (so it slides along walls and desks); returns how far it really went. */
+  private shoveBody(b: { x: number; y: number; r: number }, dx: number, dy: number): number {
+    const p = this.bodyPos;
+    p.x = b.x;
+    p.y = b.y;
+    this.world.moveCircle(p, b.r, dx, dy);
+    const moved = Math.hypot(p.x - b.x, p.y - b.y);
+    b.x = p.x;
+    b.y = p.y;
+    return moved;
+  }
+
+  /**
+   * Nobody stands inside anybody: coworkers push each other apart (the lighter one gives way) and step out of your
+   * way. A charging boss ploughs through, a dodge-roll still slips through people, and if a coworker is pinned
+   * against a wall you're the one who stops.
+   */
+  private resolveBodies() {
+    const list = this.enemies, n = list.length;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < n; i++) {
+        const a = list[i];
+        if (a.dead) continue;
+        for (let j = i + 1; j < n; j++) {
+          const b = list[j];
+          if (b.dead) continue;
+          let dx = b.x - a.x, dy = b.y - a.y;
+          const rr = a.r + b.r, d2 = dx * dx + dy * dy;
+          if (d2 >= rr * rr) continue;
+          let d = Math.sqrt(d2);
+          if (d < 0.01) {
+            // Exactly on top of each other: split along a direction that's stable for this pair.
+            const ang = ((a.id * 7919 + b.id * 104729) % 628) / 100;
+            dx = Math.cos(ang); dy = Math.sin(ang); d = 0;
+          } else { dx /= d; dy /= d; }
+          const ma = a.rampaging ? 1e6 : a.mass, mb = b.rampaging ? 1e6 : b.mass;
+          const push = rr - d;
+          this.shoveBody(a, -dx * push * (mb / (ma + mb)), -dy * push * (mb / (ma + mb)));
+          this.shoveBody(b, dx * push * (ma / (ma + mb)), dy * push * (ma / (ma + mb)));
+        }
+      }
+    }
+    const pl = this.player;
+    if (pl.dead || pl.rolling > 0) return;
+    for (const e of list) {
+      if (e.dead) continue;
+      let dx = e.x - pl.x, dy = e.y - pl.y;
+      const rr = e.r + pl.r, d2 = dx * dx + dy * dy;
+      if (d2 >= rr * rr) continue;
+      let d = Math.sqrt(d2);
+      if (d < 0.01) { dx = Math.cos(e.id); dy = Math.sin(e.id); d = 0; } else { dx /= d; dy /= d; }
+      const push = rr - d;
+      // A charging boss runs you over (the hit and its knockback do the shoving); everyone else steps aside.
+      if (e.rampaging) continue;
+      const moved = this.shoveBody(e, dx * push, dy * push);
+      if (moved < push - 0.5) this.shoveBody(pl, -dx * (push - moved), -dy * (push - moved));
+    }
+  }
+
   private updateChairs(dt: number) {
     const movers: { x: number; y: number; vx: number; vy: number; r: number }[] = [this.player];
     for (const e of this.enemies) if (!e.dead && e.mode !== "npc") movers.push(e);
@@ -2265,6 +2326,7 @@ export class GameScene extends Phaser.Scene {
 
     if (this.phase !== "review" && this.phase !== "results") {
       this.timed("enemies", () => { for (const e of [...this.enemies]) e.update(dt); });
+      this.timed("bodies", () => this.resolveBodies());
       this.timed("projectiles", () => this.projectiles.update(dt));
       this.pickups.update(dt);
       this.timed("hazards", () => this.hazards.update(dt));
