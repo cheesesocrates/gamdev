@@ -579,6 +579,11 @@ try {
       god: document.querySelector(".ch-god").getAttribute("aria-checked"),
       hearts: document.querySelector(".ch-hp").textContent
     }))));
+    // Max out the review's first upgrade offer here: buying it in the review afterwards must not take money.
+    const maxedOffer = await ev(() => window.__HT.scene.reviewOffers[0].perk.id);
+    const incOpen = () => ev((id) => !document.querySelector(`.ch-perk[data-id="${id}"] .inc`).disabled, maxedOffer);
+    for (let i = 0; i < 6 && (await incOpen()); i++) await click(`.ch-perk[data-id="${maxedOffer}"] .inc`);
+    console.log("maxed", maxedOffer, "->", await ev((id) => document.querySelector(`.ch-perk[data-id="${id}"] .ch-n`).textContent, maxedOffer));
     // Typing in the search box (M mutes the game, P pauses it) must never reach the game.
     await page.click(".ch-search input");
     await page.keyboard.type("mic", { delay: 60 });
@@ -616,12 +621,24 @@ try {
     console.log("Esc -> open:", await isOpen(), "| review inert:", await ev(() => document.querySelector("#review")?.inert), "| key listeners:", await keyListeners(), "| Phaser keys held:", await ev(() => window.__HT.scene.input.keyboard.keys.filter((k) => k && k.isDown).length));
     console.log("review cards", JSON.stringify(await ev(() => { const s = window.__HT.scene; return [...document.querySelectorAll("#review .card")].map((c) => ({ id: s.reviewOffers[Number(c.dataset.i)].perk.id, cls: c.className.replace("card ", ""), own: c.querySelector(".c-own")?.textContent })); })));
     console.log("review guns", JSON.stringify(await ev(() => { const h = window.__HT; return [...document.querySelectorAll("#review .gun")].map((g) => { const id = h.scene.reviewGuns[Number(g.dataset.g)].id; return { id, owned: h.state.unlocked[id], cls: g.className }; }); })));
+    console.log("click the maxed offer", JSON.stringify(await ev((id) => {
+      const h = window.__HT, s = h.scene, i = s.reviewOffers.findIndex((o) => o.perk.id === id), before = h.state.bank;
+      document.querySelector(`#review .card[data-i="${i}"]`)?.click();
+      return { id, bank: [before, h.state.bank], sold: s.reviewOffers[i].sold };
+    }, maxedOffer)));
     await shot("k04-review-after");
-    // Reopen: a click inside the guard is ignored, a drag out of (or into) the panel is not a backdrop click, a real one closes.
-    await ev(() => window.__HT.cheats());
-    await sleep(80);
-    await page.mouse.click(1268, 12);
-    console.log("backdrop click inside the guard -> open:", await isOpen());
+    // Reopen: clicks inside the guard are ignored (done in the same tick so a slow machine can't miss the window),
+    // a drag out of (or into) the panel is not a backdrop click, a real one closes.
+    console.log("clicks inside the guard", JSON.stringify(await ev(() => {
+      const h = window.__HT;
+      h.cheats();
+      const r = document.querySelector("#cheats"), before = h.state.stack("speed");
+      r.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      r.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+      r.click();
+      r.querySelector('.ch-perk[data-id="speed"] .inc').click();
+      return { open: !!document.querySelector("#cheats"), speed: [before, h.state.stack("speed")] };
+    })));
     await sleep(450);
     for (const [from, to] of [[[700, 400], [1268, 12]], [[1268, 12], [700, 400]]]) {
       await page.mouse.move(...from);
