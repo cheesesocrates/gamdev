@@ -10,6 +10,8 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Fix (World): the Middle Manager (the one who throws three memos) and the Consultant boss showed up as missing
   textures. Their sprites are loaded again; the preload list is now built from the coworker table, so a coworker can't
   lose its art like that again.
+- Fix (World): power strips lie flat on the floor. They used to be depth-sorted like desks, so walking just above
+  one drew it on top of you and it looked like it was floating.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.

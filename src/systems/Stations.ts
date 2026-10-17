@@ -175,7 +175,8 @@ export class Stations {
   }
 
   private addProp(kind: DailyProp, x: number, y: number) {
-    const furn = spawnFurniture(this.g, this.g.world, kind, x, y, kind === "powerstrip" ? { solid: false, shots: false } : {});
+    // Power strips lie flat on the carpet: never drawn over the people walking past them.
+    const furn = spawnFurniture(this.g, this.g.world, kind, x, y, kind === "powerstrip" ? { solid: false, shots: false, flat: true } : {});
     const s = this.make({ id: `${kind}_${this.list.length}`, kind, x, y }, furn);
     s.dynamic = true;
     this.list.push(s);

@@ -101,15 +101,21 @@ export function buildFurniture(scene: Phaser.Scene, map: OfficeMap, world: World
   return { furniture, chairs };
 }
 
-/** Creates one piece of furniture mid-game (daily water coolers and power strips). */
-export function spawnFurniture(scene: Phaser.Scene, world: World, key: string, x: number, y: number, opts: { solid?: boolean; shots?: boolean } = {}): FurnObj {
+/** Above puddles and loose paper, below the fire glow and everyone standing on the floor. */
+export const FLAT_DEPTH = DEPTH.HAZARD + 1.5;
+
+/**
+ * Creates one piece of furniture mid-game (daily water coolers and power strips). `flat` things lie on the floor
+ * (power strips): they're drawn under every character instead of being depth-sorted like a desk.
+ */
+export function spawnFurniture(scene: Phaser.Scene, world: World, key: string, x: number, y: number, opts: { solid?: boolean; shots?: boolean; flat?: boolean } = {}): FurnObj {
   const manifest = scene.cache.json.get("furnManifest") as Record<string, ManifestEntry>;
   const me = manifest[key];
   const w = me ? Math.max(14, me.footW * PPU * 0.94) : 40;
   const h = me ? Math.max(14, me.footD * PPU * 0.94) : 40;
   const sprite = scene.add.image(x, y, `furn_${key}`);
   if (me) sprite.setOrigin(me.anchorX, me.anchorY);
-  sprite.setDepth(y + h / 2);
+  sprite.setDepth(opts.flat ? FLAT_DEPTH : y + h / 2);
   const b = baseKey(key);
   const solid = opts.solid ?? !NOT_SOLID.has(b);
   const shots = opts.shots ?? (solid && !NO_SHOTS.has(b));
