@@ -22,7 +22,12 @@ interface Prop {
   /** Potted plants shatter when they hit something hard; swept up overnight. */
   fragile: boolean;
   broken: boolean;
+  /** The boss (you) set it moving: only then does it hurt the coworkers it runs into. */
+  byPlayer: boolean;
 }
+
+/** How fast a shoved desk has to be travelling *into* a coworker (along the contact normal) to hurt them. */
+const RAM_SPEED = 140;
 
 /**
  * Pushable furniture. Lean into a table and it slides; dodge-roll into it and it
@@ -39,7 +44,7 @@ export class Props {
       const neighbours = new Set<Collider>();
       g.world.queryBox(f.x - f.w / 2 - 2, f.y - f.h / 2 - 2, f.x + f.w / 2 + 2, f.y + f.h / 2 + 2, (c) => { if (c !== f.collider) neighbours.add(c); });
       const area = (f.w * f.h) / (TILE * TILE);
-      this.list.push({ f, homeX: f.x, homeY: f.y, vx: 0, vy: 0, mass: Math.max(0.6, area * 1.6), moving: false, neighbours, hitCd: new Map(), fragile: f.key === "plant", broken: false });
+      this.list.push({ f, homeX: f.x, homeY: f.y, vx: 0, vy: 0, mass: Math.max(0.6, area * 1.6), moving: false, neighbours, hitCd: new Map(), fragile: f.key === "plant", broken: false, byPlayer: false });
     }
   }
 
@@ -48,6 +53,7 @@ export class Props {
     for (const p of this.list) {
       p.vx = p.vy = 0;
       p.moving = false;
+      p.byPlayer = false;
       p.hitCd.clear();
       p.broken = false;
       p.f.sprite.setVisible(true);
@@ -55,15 +61,16 @@ export class Props {
     }
   }
 
-  /** Something huge hit this piece of furniture: it flies (plants shatter). False if it isn't a prop. */
+  /** Something huge (a charging boss) hit this piece of furniture: it flies (plants shatter). False if it isn't a prop. */
   launch(f: FurnObj, vx: number, vy: number, by?: { id: number }): boolean {
     const p = this.list.find((q) => q.f === f);
     if (!p || p.broken) return false;
-    if (p.fragile) { this.shatter(p); return true; }
+    if (p.fragile) { this.shatter(p, false); return true; }
     if (Math.hypot(p.vx, p.vy) > Math.hypot(vx, vy) * 0.6) return true;
     p.vx = vx;
     p.vy = vy;
     p.moving = true;
+    p.byPlayer = false;
     // Whoever sent it flying doesn't get hit by it.
     if (by) p.hitCd.set(by.id, 1.2);
     this.g.audio.play("wood_heavy", { vol: 0.6, minGap: 80 });
@@ -104,6 +111,7 @@ export class Props {
           p.vx = nx * kick;
           p.vy = ny * kick;
           p.moving = true;
+          p.byPlayer = true;
           g.audio.play("wood_heavy", { vol: 0.55, minGap: 120 });
           g.fx.shake(0.15);
           g.fx.burst("pixel", f.x, f.y, 8, 0xd8c3a5);
@@ -111,6 +119,7 @@ export class Props {
           const want = into * 0.9 * Math.min(1, 2.2 / p.mass) * (jockey ? 1.5 : 1);
           if (horiz) p.vx = nx * Math.max(Math.abs(p.vx), want); else p.vy = ny * Math.max(Math.abs(p.vy), want);
           p.moving = true;
+          p.byPlayer = true;
         }
       }
       if (!p.moving) continue;
@@ -118,6 +127,7 @@ export class Props {
       if (speed < 6) {
         p.vx = p.vy = 0;
         p.moving = false;
+        p.byPlayer = false;
         this.navDirty = true;
         continue;
       }
@@ -133,7 +143,7 @@ export class Props {
           else { this.bump(p, Math.abs(p.vy)); p.vy *= -0.25; }
         }
       }
-      if (speed > 160 && g.phase === "downsizing") this.ram(p, speed);
+      if (speed > 160 && p.byPlayer && g.phase === "downsizing") this.ram(p, speed);
       const fr = Math.pow(0.08, dt);
       p.vx *= fr;
       p.vy *= fr;
@@ -150,21 +160,30 @@ export class Props {
   }
 
   private bump(p: Prop, speed: number) {
-    if (p.fragile && speed > 480) { this.shatter(p); return; }
+    if (p.fragile && speed > 480) { this.shatter(p, p.byPlayer); return; }
     if (speed < 160) return;
     const g = this.g;
     g.audio.play("wood", { vol: Math.min(0.6, speed / 900), minGap: 90 });
     g.fx.burst("pixel", p.f.x, p.f.y, 5, 0xd8c3a5);
   }
 
-  /** A desk at full speed bowls coworkers over. */
+  /**
+   * A desk you shoved, at full speed, bowls coworkers over. Only the ones it is actually travelling into:
+   * walking into the side (or the back) of a sliding desk doesn't hurt.
+   */
   private ram(p: Prop, speed: number) {
     const g = this.g, f = p.f;
     const jockey = GameState.stats.deskJockey;
     for (const e of [...g.enemies]) {
       if (e.dead || !e.hostile || p.hitCd.has(e.id)) continue;
       const cx = clamp(e.x, f.x - f.w / 2, f.x + f.w / 2), cy = clamp(e.y, f.y - f.h / 2, f.y + f.h / 2);
-      if ((e.x - cx) ** 2 + (e.y - cy) ** 2 > (e.r + 8) ** 2) continue;
+      const d2 = (e.x - cx) ** 2 + (e.y - cy) ** 2;
+      if (d2 > (e.r + 8) ** 2) continue;
+      // Contact normal from the desk to the coworker (from the centres when they already overlap).
+      let nx = e.x - cx, ny = e.y - cy;
+      if (d2 < 1) { nx = e.x - f.x; ny = e.y - f.y; }
+      const nl = Math.hypot(nx, ny) || 1;
+      if ((p.vx * nx + p.vy * ny) / nl < RAM_SPEED) continue;
       p.hitCd.set(e.id, 0.5);
       const ang = Math.atan2(p.vy, p.vx);
       e.stun = Math.max(e.stun, 0.8);
@@ -175,12 +194,12 @@ export class Props {
       g.hitEnemy(e, dmg, { angle: ang, kind: "chair", x: e.x, y: e.y, knock: speed * 0.9 });
       p.vx *= 0.65;
       p.vy *= 0.65;
-      if (p.fragile) { this.shatter(p); return; }
+      if (p.fragile) { this.shatter(p, true); return; }
     }
   }
 
-  /** A flying pot plant breaks on impact: soil everywhere, and a little shrapnel for anyone close. */
-  private shatter(p: Prop) {
+  /** A flying pot plant breaks on impact: soil everywhere, and (if you threw it) a little shrapnel for anyone close. */
+  private shatter(p: Prop, hurt: boolean) {
     if (p.broken) return;
     const g = this.g, f = p.f;
     p.broken = true;
@@ -194,7 +213,8 @@ export class Props {
     g.fx.decal(f.x, f.y, "rubble", { scale: 0.7, alpha: 0.9, tint: 0x8a5a3b });
     g.audio.play("plate", { vol: 0.6, minGap: 60 });
     g.audio.play("crunch", { vol: 0.4, minGap: 60 });
-    if (g.phase === "downsizing") {
+    p.byPlayer = false;
+    if (hurt && g.phase === "downsizing") {
       for (const e of [...g.enemies]) {
         if (e.dead || !e.hostile || (e.x - f.x) ** 2 + (e.y - f.y) ** 2 > 80 * 80) continue;
         e.stun = Math.max(e.stun, 0.6);

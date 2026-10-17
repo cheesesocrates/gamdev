@@ -37,6 +37,8 @@ export interface Chair {
   rot: number; // radians, snapped to 4 sprite directions
   spin: number;
   sprite: Phaser.GameObjects.Image;
+  /** Last sent flying by the boss (you): only then does it bowl coworkers over. */
+  byPlayer: boolean;
 }
 
 export function baseKey(key: string) {
@@ -58,7 +60,7 @@ export function buildFurniture(scene: Phaser.Scene, map: OfficeMap, world: World
       const me = manifest[p.key];
       if (me) sprite.setOrigin(me.anchorX, me.anchorY);
       sprite.setDepth(p.y + 8);
-      chairs.push({ base, x: p.x, y: p.y, vx: 0, vy: 0, rot, spin: 0, sprite });
+      chairs.push({ base, x: p.x, y: p.y, vx: 0, vy: 0, rot, spin: 0, sprite, byPlayer: false });
       continue;
     }
 

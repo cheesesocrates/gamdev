@@ -418,7 +418,7 @@ export class GameScene extends Phaser.Scene {
     this.sprinklerT = 0;
     this.chairs.forEach((c, k) => {
       const h = this.chairHomes[k];
-      c.x = h.x; c.y = h.y; c.rot = h.rot; c.vx = c.vy = c.spin = 0;
+      c.x = h.x; c.y = h.y; c.rot = h.rot; c.vx = c.vy = c.spin = 0; c.byPlayer = false;
       const deg = Math.round(Phaser.Math.RadToDeg(h.rot) / 90) * 90 % 360;
       c.sprite.setTexture(`furn_${c.base}_${(deg + 360) % 360}`).setPosition(c.x, c.y).setRotation(0).setDepth(c.y - 2);
     });
@@ -1350,6 +1350,7 @@ export class GameScene extends Phaser.Scene {
         c.vx += (dx / (d || 1)) * f;
         c.vy += (dy / (d || 1)) * f;
         c.spin += rand(-14, 14);
+        c.byPlayer = opts.friendly;
       }
     }
   }
@@ -1529,6 +1530,7 @@ export class GameScene extends Phaser.Scene {
       c.vx += e.vx * 1.2;
       c.vy += e.vy * 1.2;
       c.spin += rand(-20, 20);
+      c.byPlayer = false;
     }
   }
 
@@ -1833,6 +1835,9 @@ export class GameScene extends Phaser.Scene {
         const rr = m.r + 15;
         const d2 = dx * dx + dy * dy;
         if (d2 > rr * rr || d2 < 0.01) continue;
+        // Whoever shoves a chair owns it, unless it's already flying (a coworker can't take over your bowling ball).
+        if (m === this.player) c.byPlayer = true;
+        else if (Math.hypot(c.vx, c.vy) < 300) c.byPlayer = false;
         const d = Math.sqrt(d2);
         const push = rr - d;
         c.x += (dx / d) * push;
@@ -1844,12 +1849,13 @@ export class GameScene extends Phaser.Scene {
       }
       const sp = Math.abs(c.vx) + Math.abs(c.vy) + Math.abs(c.spin);
       if (sp < 0.5) continue;
-      // Office-chair bowling: fast chairs bowl coworkers over.
+      // Office-chair bowling: a chair you sent flying bowls over whoever it rolls into.
       const speed = Math.hypot(c.vx, c.vy);
-      if (speed > 300 && this.phase === "downsizing") {
+      if (speed > 300 && c.byPlayer && this.phase === "downsizing") {
         for (const e of [...this.enemies]) {
           if (e.dead || !e.hostile) continue;
           if ((e.x - c.x) ** 2 + (e.y - c.y) ** 2 > (e.r + 17) ** 2) continue;
+          if ((e.x - c.x) * c.vx + (e.y - c.y) * c.vy <= 0) continue;
           const ang = Math.atan2(c.vy, c.vx);
           e.stun = Math.max(e.stun, 0.7);
           this.fx.text(e.x, e.y - 40, "STRIKE!", { color: "#6aa3b4", size: 16, pop: true, dur: 0.7 });

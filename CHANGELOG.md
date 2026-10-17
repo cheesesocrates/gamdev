@@ -33,6 +33,10 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Gameplay: HR Directors who slip in a puddle keep their riot shield in hand and spin round with it, instead of the
   shield fading away. Zapped in a live puddle, they spin too. (The shield still can't block while they're down; a
   keyboard bonk still knocks it aside.)
+- Gameplay: desks, tables, boxes and potted plants only hurt coworkers when **you** sent them flying into them (a
+  shove or a dodge-roll), and only the coworkers they're actually travelling into. A coworker walking into the side of
+  a sliding desk, or a desk the Hatchet Man knocked loose, doesn't hurt anyone; a pot only throws shrapnel if you threw
+  it. Office chairs follow the same rule: a chair a coworker bumped into no longer bowls coworkers over.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.
