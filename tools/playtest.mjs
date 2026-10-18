@@ -405,6 +405,20 @@ try {
     await page.keyboard.press("Space");
     await sleep(1500);
     const rect = (sel) => ev((s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }, sel);
+    const prog = () => ev(() => parseFloat(document.querySelector(".mini-prog > div")?.style.width ?? "") || 0);
+    // A steady hand: press, then many small moves a moment apart along a straight line at `speed` px/s. Each
+    // point comes from the clock, so the slow headless frame rate can't turn the drag into a crawl or a flick.
+    const drag = async (x0, y0, x1, y1, speed) => {
+      await page.mouse.move(x0, y0);
+      await page.mouse.down();
+      const len = Math.hypot(x1 - x0, y1 - y0), t0 = Date.now();
+      for (let f = 0; f < 1; ) {
+        await sleep(12);
+        f = Math.min(1, (speed * (Date.now() - t0)) / 1000 / len);
+        await page.mouse.move(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, { steps: 2 });
+      }
+      await page.mouse.up();
+    };
     for (const c of ["plant", "print", "shred", "coffee", "presentation", "memos", "server", "emails", "jam", "wifi", "mail", "board"]) {
       await ev((chore) => { const s = window.__HT.scene; s.mini?.close(); s.mini = null; s.startMini(chore, () => {}); }, c);
       await sleep(700);
@@ -417,7 +431,29 @@ try {
       } else if (c === "print" || c === "presentation") {
         for (let i = 0; i < 3; i++) { await page.keyboard.press("Space"); await sleep(260); }
       } else if (c === "shred") {
-        for (let i = 0; i < 7; i++) { await page.keyboard.press("Space"); await sleep(70); }
+        // Real drags: a steady stroke at a moderate speed (one whole document), a fast flick (it should jam),
+        // then another steady stroke, caught mid-drag with the needle in JUST RIGHT.
+        const r = await rect(".mini-stage");
+        if (r) {
+          const x = r.x + r.w * 0.5, top = r.y + r.h * 0.08, bottom = r.y + r.h * 0.74, steady = r.h * 0.5;
+          const info = async () => ({ prog: await prog(), ...(await ev(() => ({ zone: document.querySelector(".sh-gauge")?.dataset.z, jammed: !!document.querySelector(".sh-head.jam") }))) });
+          await drag(x, top, x, bottom, steady);
+          console.log("  shred stroke", JSON.stringify(await info()));
+          await sleep(400);
+          await page.mouse.move(x, top);
+          await page.mouse.down();
+          for (let i = 1; i <= 3; i++) await page.mouse.move(x, top + r.h * 0.22 * i);
+          console.log("  shred flick", JSON.stringify(await info()));
+          await page.mouse.up();
+          await sleep(900);
+          const stroke = drag(x, top, x, bottom, steady);
+          await sleep(700);
+          await shot("m-shred-drag");
+          console.log("  shred mid-drag", JSON.stringify(await info()));
+          await stroke;
+          await sleep(300);
+          console.log("  shred after", JSON.stringify(await info()));
+        }
       } else if (c === "coffee") {
         for (let i = 0; i < 3; i++) {
           const r = await rect(".cf-leak:not(.fixed)");
@@ -456,7 +492,38 @@ try {
       } else if (c === "jam") {
         for (const k of ["KeyA", "KeyD", "KeyA", "KeyD", "KeyA", "KeyD", "KeyD"]) { await page.keyboard.press(k); await sleep(90); }
       } else if (c === "wifi") {
-        await sleep(1700);
+        // Swing the antennas with a mouse drag, then hunt for the signal with held keys (sweeping, turning back at
+        // the stops) and let go whenever it's strong, until the connection is about half done.
+        const wifi = async () => ({ prog: await prog(), ...(await ev(() => ({
+          text: document.querySelector(".wf-state")?.textContent,
+          angle: Number(/rotate\(([-\d.]+)\)/.exec(document.querySelector(".wf-ant")?.getAttribute("transform") ?? "")?.[1] ?? 0)
+        }))) });
+        const r = await rect(".mini-stage");
+        if (r) {
+          const y = r.y + r.h * 0.5;
+          await drag(r.x + r.w * 0.6, y, r.x + r.w * 0.4, y, r.w * 0.3);
+          console.log("  wifi after drag", JSON.stringify(await wifi()));
+        }
+        let dir = 1, held = null;
+        const hold = async (key) => {
+          if (held === key) return;
+          if (held) await page.keyboard.up(held);
+          held = key;
+          if (key) await page.keyboard.down(key);
+        };
+        for (const t0 = Date.now(); Date.now() - t0 < 7000; ) {
+          const w = await wifi();
+          if (w.prog >= 45) break;
+          if (w.text === "STRONG") await hold(null);
+          else {
+            if (w.angle >= 74) dir = -1;
+            else if (w.angle <= -74) dir = 1;
+            await hold(dir > 0 ? "KeyD" : "KeyA");
+          }
+          await sleep(40);
+        }
+        await hold(null);
+        console.log("  wifi", JSON.stringify(await wifi()));
       } else if (c === "mail") {
         for (const k of ["Digit1", "Digit2", "Digit3"]) { await page.keyboard.press(k); await sleep(420); }
       } else if (c === "board") {
