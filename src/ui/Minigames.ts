@@ -75,6 +75,12 @@ const pressKey = (k: HTMLElement) => {
 const svgCursor = (svg: string, hx: number, hy: number, fallback = "pointer") =>
   `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hx} ${hy}, ${fallback}`;
 const isPress = (e: KeyboardEvent) => (e.code === "Space" || e.code === "Enter") && !e.repeat;
+/** Stage units per screen pixel along one axis, from the stage's on-screen box (the panel may still be scaling in). */
+const unitsPerPx = (S: HTMLElement, axis: "x" | "y") => {
+  const r = S.getBoundingClientRect();
+  const k = axis === "x" ? (W * S.offsetWidth) / (S.clientWidth * r.width) : (H * S.offsetHeight) / (S.clientHeight * r.height);
+  return Number.isFinite(k) && k > 0 ? k : 1;
+};
 
 // ================================================================== art
 
@@ -226,79 +232,194 @@ function jamGame(api: Api, o: MiniOpts): Game {
 
 // ================================================================== reset the wi-fi
 
-/** Simon says, with a router: watch the lights, play them back. Rounds get one step longer. */
+/** The router, in stage units. Each antenna stalk turns about its hinge (pivots at x 140 and 260, y 198). */
+const WIFI_SVG = `<svg class="wf-svg" viewBox="0 0 560 300" aria-hidden="true">
+  <rect x="0" y="262" width="560" height="40" fill="#5b4030"/><rect x="0" y="258" width="560" height="8" fill="#7d5a40"/>
+  <ellipse cx="200" cy="262" rx="134" ry="6" fill="#000" opacity=".3"/>
+  ${[140, 260].map((x) => `<g class="wf-ant" transform="translate(${x} 198) rotate(0)">
+    <g class="wf-waves" opacity="0"><path d="M-14 -130 Q0 -141 14 -130"/><path d="M-25 -141 Q0 -160 25 -141"/></g>
+    <path d="M0 0 V-112" stroke="${INK}" stroke-width="15" stroke-linecap="round"/>
+    <path d="M0 -8 V-112" stroke="#4a4f5c" stroke-width="8" stroke-linecap="round"/>
+    <path d="M-1.5 -26 V-100" stroke="#7a8190" stroke-width="2.5" stroke-linecap="round"/>
+  </g>`).join("")}
+  <g stroke="${INK}" stroke-width="3" stroke-linejoin="round">
+    <rect x="98" y="250" width="28" height="12" rx="3" fill="#15171b"/><rect x="274" y="250" width="28" height="12" rx="3" fill="#15171b"/>
+    <rect x="80" y="194" width="240" height="62" rx="14" fill="#2a2c33"/>
+    <rect x="124" y="186" width="32" height="18" rx="6" fill="#3a3c44"/><rect x="244" y="186" width="32" height="18" rx="6" fill="#3a3c44"/>
+  </g>
+  <path d="M96 208 H304" stroke="#fff" stroke-opacity=".12" stroke-width="4" stroke-linecap="round"/>
+  <circle class="wf-led" cx="108" cy="234" r="7" fill="#d0392e"/>
+  <circle cx="128" cy="234" r="4" fill="#4b9a63"/><circle cx="142" cy="234" r="4" fill="#4b9a63" opacity=".5"/>
+  <text x="214" y="241" text-anchor="middle" font-family="Jersey 10, monospace" font-size="18" fill="#9aa3b0" letter-spacing="1">ROUTE-O-TRON</text>
+  <path d="M270 224 h34 M270 234 h34 M270 244 h34" stroke="#17191d" stroke-width="3.5" stroke-linecap="round"/>
+</svg>`;
+
+const WIFI_NEWS = ["Someone microwaved fish!", "Bluetooth speaker detected!", "Kevin is streaming in 4K!", "The smart fridge is updating!", "Someone's baby monitor!", "A space heater turned on!", "IT is \"running updates\"!", "The printer joined the network!"];
+
+/**
+ * Reset the Wi-Fi: turn the antennas to the sweet spot and hold full bars. The spot drifts, and every few
+ * seconds something in the office knocks it somewhere new (the meter fizzes with static first).
+ */
 function wifiGame(api: Api, o: MiniOpts): Game {
   const S = api.stage;
-  const rounds = clamp(Math.round(1 + o.len * 1.4), 2, 4);
-  const COLS = ["#3fa35a", "#f0c93a", "#2f64c8", "#d0392e"];
-  S.insertAdjacentHTML("beforeend", `
-    <svg class="wf-svg" viewBox="0 0 560 300" aria-hidden="true">
-      <g stroke="#1c1d21" stroke-width="3" stroke-linecap="round">
-        <path d="M206 92 L176 18 M354 92 L384 18" stroke-width="7"/>
-        <rect x="170" y="88" width="220" height="56" rx="12" fill="#2a2c33"/>
-      </g>
-      <g class="wf-bars">${[0, 1, 2, 3].map((i) => `<rect x="${246 + i * 18}" y="${128 - i * 8 - 10}" width="12" height="${10 + i * 8}" rx="2" fill="#4a4d57"/>`).join("")}</g>
-      <circle class="wf-led" cx="196" cy="116" r="6" fill="#d0392e"/>
-    </svg>
-    <div class="wf-row">${COLS.map((c, i) => `<button class="wf-b" data-i="${i}" style="--c:${c}"><b>${i + 1}</b></button>`).join("")}</div>`);
-  const btns = Array.from(S.querySelectorAll<HTMLElement>(".wf-b"));
-  const bars = Array.from(S.querySelectorAll<SVGRectElement>(".wf-bars rect"));
+  const need = 2.2 * o.len;
+  // Later days only take longer: the drift and the interference stop getting worse after day 3.
+  const hard = clamp((o.len - 1) / 0.35, 0, 1);
+  const maxDrift = 7 + 5 * hard;
+  const gap = () => rand(3.4, 4.4) - 0.5 * hard;
+  const LIM = 75, FUZZ = 0.6, PIVOTS = [140, 260];
+  S.insertAdjacentHTML("beforeend", WIFI_SVG + `
+    <div class="wf-meter"><div class="wf-state">NO SIGNAL</div><div class="wf-bars">${"<i><b></b></i>".repeat(5)}</div><div class="wf-fuzz"></div></div>
+    <div class="wf-alert"><b>INTERFERENCE!</b><span></span></div>`);
+  const ants = Array.from(S.querySelectorAll<SVGGElement>(".wf-ant"));
+  const waves = Array.from(S.querySelectorAll<SVGGElement>(".wf-waves"));
+  const fills = Array.from(S.querySelectorAll<HTMLElement>(".wf-bars b"));
   const led = S.querySelector(".wf-led") as SVGCircleElement;
-  let round = 0, seq: number[] = [], step = 0, listening = false, dead = false;
-  const timers: number[] = [];
-  const later = (ms: number, fn: () => void) => { timers.push(window.setTimeout(() => { if (!dead) fn(); }, ms)); };
-  const flash = (i: number, ms = 320) => {
-    const b = btns[i];
-    b.classList.add("lit");
-    api.sfx(`dtmf_${i + 1}`);
-    later(ms, () => b.classList.remove("lit"));
+  const meter = q(S, ".wf-meter"), label = q(S, ".wf-state"), alert = q(S, ".wf-alert");
+  let angle = 0, target = pick([-1, 1]) * rand(30, 56), driftV = 0, driftGoal = 0, driftT = 0, jumpT = gap() + 0.8;
+  let v = 0, weakT = 0, tickT = 0, holdT = 0, lastDir = 0, alertT = 0, found = false, done = false;
+  let dragging = false, pid = -1, lastX = 0, k = 1, keyL = false, keyR = false;
+  // What the DOM shows right now, so a frame only touches what changed.
+  let drawnAngle = 0, drawnZone = "", drawnText = "NO SIGNAL", drawnHint = "", drawnWave = 0, drawnLed = "", drawnF = -1;
+  const drawnBars = [0, 0, 0, 0, 0];
+  /** 1 at the sweet spot, easing to 0 about 45 degrees either side. */
+  const signal = () => {
+    const d = Math.abs(angle - target);
+    return d >= 45 ? 0 : 0.5 + 0.5 * Math.cos((Math.PI * d) / 45);
   };
-  const showBars = () => bars.forEach((b, i) => b.setAttribute("fill", i < Math.round((round / rounds) * 4) ? "#8fe0a0" : "#4a4d57"));
-  const play = () => {
-    listening = false;
-    step = 0;
-    api.hint("Watch...");
-    seq.forEach((v, k) => later(500 + k * 480, () => flash(v)));
-    later(500 + seq.length * 480, () => { listening = true; api.hint("Your turn!"); });
+  const setBar = (i: number, f: number) => {
+    if (Math.abs(f - drawnBars[i]) < 0.004) return;
+    drawnBars[i] = f;
+    fills[i].style.transform = `scaleY(${f.toFixed(3)})`;
   };
-  const next = () => {
-    seq = Array.from({ length: 3 + round }, () => Math.floor(Math.random() * 4));
-    play();
+  const stopDrag = () => {
+    dragging = false;
+    pid = -1;
   };
-  const press = (i: number) => {
-    if (!listening) return;
-    flash(i, 180);
-    if (seq[step] !== i) {
-      api.sfx("bad");
-      api.shake();
-      api.pop(280, 180, "WRONG LIGHT!", "#c4382c");
-      play();
-      return;
-    }
-    step++;
-    if (step < seq.length) return;
-    round++;
-    showBars();
-    api.progress(round / rounds);
-    if (round >= rounds) {
-      led.setAttribute("fill", "#3fa35a");
-      api.pop(280, 60, "CONNECTED!", "#3fa35a");
-      api.win();
-      return;
-    }
-    listening = false;
-    api.sfx("good");
-    later(650, next);
+  const finish = () => {
+    done = true;
+    stopDrag();
+    meter.classList.remove("fuzz", "mid");
+    meter.classList.add("strong");
+    fills.forEach((b) => { b.style.transform = "scaleY(1)"; });
+    label.textContent = "CONNECTED";
+    led.setAttribute("fill", "#6fe08a");
+    waves.forEach((w) => w.setAttribute("opacity", "1"));
+    alert.classList.remove("on");
+    api.pop(200, 118, "CONNECTED!", "#6fe08a");
+    api.win();
   };
-  btns.forEach((b) => b.addEventListener("pointerdown", (e) => { e.preventDefault(); press(Number(b.dataset.i)); }));
-  showBars();
-  later(300, next);
+  // Mouse: press anywhere and drag sideways. Keys: hold A / D (or the arrows).
+  const down = (e: PointerEvent) => {
+    if (e.button !== 0 || dragging || done) return;
+    e.preventDefault();
+    dragging = true;
+    pid = e.pointerId;
+    lastX = e.clientX;
+    k = unitsPerPx(S, "x");
+    try { S.setPointerCapture(pid); } catch { /* the window listeners still follow it */ }
+  };
+  const move = (e: PointerEvent) => {
+    if (!dragging || e.pointerId !== pid) return;
+    // The button came up somewhere we never heard about.
+    if (e.pointerType === "mouse" && !(e.buttons & 1)) { stopDrag(); return; }
+    angle = clamp(angle + (e.clientX - lastX) * k * 0.42, -LIM, LIM);
+    lastX = e.clientX;
+  };
+  const up = (e: PointerEvent) => { if (e.pointerId === pid) stopDrag(); };
+  const isL = (e: KeyboardEvent) => e.code === "KeyA" || e.code === "ArrowLeft";
+  const isR = (e: KeyboardEvent) => e.code === "KeyD" || e.code === "ArrowRight";
+  const keyUp = (e: KeyboardEvent) => { if (isL(e)) keyL = false; else if (isR(e)) keyR = false; };
+  const blur = () => { keyL = keyR = false; stopDrag(); };
+  S.addEventListener("pointerdown", down);
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", up);
+  window.addEventListener("keyup", keyUp, true);
+  window.addEventListener("blur", blur);
   return {
-    key(e) {
-      const m = /^(Digit|Numpad)([1-4])$/.exec(e.code);
-      if (m) press(Number(m[2]) - 1);
+    update(dt) {
+      // Held keys turn the antennas, a little faster the longer they're held.
+      const dir = (keyR ? 1 : 0) - (keyL ? 1 : 0);
+      if (dir !== lastDir) { lastDir = dir; holdT = 0; }
+      if (dir) {
+        holdT += dt;
+        angle = clamp(angle + dir * (50 + 55 * Math.min(1, holdT / 0.6)) * dt, -LIM, LIM);
+      }
+      // The sweet spot wanders...
+      if ((driftT -= dt) <= 0) { driftT = rand(1.1, 2.3); driftGoal = rand(-maxDrift, maxDrift); }
+      driftV += (driftGoal - driftV) * Math.min(1, dt * 2);
+      target += driftV * dt;
+      if (Math.abs(target) > 60) {
+        target = clamp(target, -60, 60);
+        driftGoal = -Math.sign(target) * Math.abs(driftGoal);
+        driftV = -Math.sign(target) * Math.abs(driftV);
+      }
+      // ...and every few seconds something knocks it somewhere new, after a burst of static.
+      jumpT -= dt;
+      const fuzz = jumpT <= FUZZ;
+      if (fuzz && !meter.classList.contains("fuzz")) {
+        meter.classList.add("fuzz");
+        q(alert, "span").textContent = pick(WIFI_NEWS);
+        alert.classList.add("on");
+        alertT = FUZZ + 1.3;
+        api.sfx("tick");
+      }
+      if (jumpT <= 0) {
+        const away = target > 20 ? -1 : target < -20 ? 1 : pick([-1, 1]);
+        target = clamp(target + away * rand(28, 40), -60, 60);
+        jumpT = gap();
+        weakT = 0;
+        meter.classList.remove("fuzz");
+      }
+      if (alertT > 0 && (alertT -= dt) <= 0) alert.classList.remove("on");
+
+      const s = signal(), strong = s >= 0.72, weak = s < 0.35;
+      if (strong) found = true;
+      v = clamp(v + (strong ? dt : -dt * 0.4), 0, need);
+      const f = v / need;
+      if (f !== drawnF) { drawnF = f; api.progress(f); }
+      tickT = Math.max(0, tickT - dt);
+      if (strong && tickT <= 0) { tickT = 0.35; api.sfx("tick"); }
+      // Losing the signal for too long once it's connecting costs time.
+      if (weak && f > 0.04) {
+        if ((weakT += dt) > 1.8) { weakT = 0; api.sfx("bad"); api.pop(200, 118, "CONNECTION LOST!", "#ff6a55"); }
+      } else weakT = 0;
+
+      if (angle !== drawnAngle) {
+        drawnAngle = angle;
+        ants.forEach((g, i) => g.setAttribute("transform", `translate(${PIVOTS[i]} 198) rotate(${angle.toFixed(2)})`));
+      }
+      for (let i = 0; i < 5; i++) setBar(i, fuzz ? Math.random() : clamp(s * 5 - i, 0, 1));
+      const zone = fuzz || weak ? "" : strong ? "strong" : "mid";
+      if (zone !== drawnZone) {
+        if (drawnZone) meter.classList.remove(drawnZone);
+        if (zone) meter.classList.add(zone);
+        drawnZone = zone;
+      }
+      const text = fuzz ? "STATIC!" : strong ? "STRONG" : !weak ? "FAIR" : s > 0.04 ? "WEAK" : "NO SIGNAL";
+      if (text !== drawnText) { drawnText = text; label.textContent = text; }
+      const wave = Math.round(clamp((s - 0.5) / 0.3, 0, 1) * 20) / 20;
+      if (wave !== drawnWave) { drawnWave = wave; waves.forEach((w) => w.setAttribute("opacity", String(wave))); }
+      const ledCol = strong ? "#e9c25a" : Math.floor(performance.now() / 300) % 2 ? "#d0392e" : "#5a2620";
+      if (ledCol !== drawnLed) { drawnLed = ledCol; led.setAttribute("fill", ledCol); }
+      const hint = alertT > 0 ? "" : !found ? "Find the signal!" : weak ? "Signal lost! Re-aim!" : "";
+      if (hint !== drawnHint) { drawnHint = hint; api.hint(hint); }
+      if (v >= need) finish();
     },
-    destroy() { dead = true; timers.forEach((t) => clearTimeout(t)); }
+    key(e) {
+      // Auto-repeat changes nothing (and a key still held from walking over doesn't turn them): keyup ends the turn.
+      if (e.repeat) return;
+      if (isL(e)) keyL = true;
+      else if (isR(e)) keyR = true;
+    },
+    destroy() {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("keyup", keyUp, true);
+      window.removeEventListener("blur", blur);
+    }
   };
 }
 
@@ -792,65 +913,173 @@ function printGame(api: Api, o: MiniOpts): Game {
   };
 }
 
-/** Shred the Evidence: mash to push each document through. */
+const DOWN_ARROW_SVG = `<svg viewBox="0 0 40 48" aria-hidden="true"><path d="M13 3 H27 V23 H37 L20 45 L3 23 H13 Z" fill="#fff" stroke="${INK}" stroke-width="3.5" stroke-linejoin="round"/></svg>`;
+
+/** Shred the Evidence: drag each document down into the slot at a steady speed. Too fast jams it, too slow stalls it. */
 function shredGame(api: Api, o: MiniOpts): Game {
   const S = api.stage;
   const docs = Math.max(2, Math.round(3 * o.len));
-  const per = Math.max(5, Math.round((19 * o.len) / docs));
+  // Stage units: how far a document travels, the clip window's height, the JUST RIGHT band (per second; a natural
+  // stroke peaks near twice its average, so a 0.6 s stroke still fits while a swipe or flick doesn't), and the
+  // speed below which the hand is plainly heading back up.
+  const TRAVEL = 145, CLIP = 141, LO = 70, HI = 450, BACK = -35;
   const words = shuffle([...SHRED_WORDS]);
   S.insertAdjacentHTML("beforeend", `
     <div class="sh-clip"><div class="sh-doc"><b></b><i></i><i></i><i style="width:70%"></i><i></i><i style="width:50%"></i></div></div>
-    <div class="sh-head"><div class="sh-slot"></div><div class="sh-label">SHRED-O-MATIC</div></div>
+    <div class="sh-head"><div class="sh-slot"></div><div class="sh-label">SHRED-O-MATIC</div>
+      <div class="sh-gauge"><span class="z0">TOO SLOW</span><span class="z1">JUST RIGHT</span><span class="z2">TOO FAST</span><i class="sh-needle"></i></div></div>
     <div class="sh-bin"><div class="sh-window"><div class="sh-fill"></div></div></div>
-    <div class="key sh-key">SPACE</div>`);
-  const doc = q(S, ".sh-doc"), stamp = q(S, ".sh-doc b"), head = q(S, ".sh-head"), fill = q(S, ".sh-fill"), win = q(S, ".sh-window"), key = q(S, ".sh-key");
-  let done = 0, p = 0, swap = 0;
+    <div class="sh-drag"><b>DRAG</b>${DOWN_ARROW_SVG}</div>`);
+  const doc = q(S, ".sh-doc"), stamp = q(S, ".sh-doc b"), head = q(S, ".sh-head"), fill = q(S, ".sh-fill"), win = q(S, ".sh-window");
+  const gauge = q(S, ".sh-gauge"), needle = q(S, ".sh-needle"), drag = q(S, ".sh-drag");
   stamp.textContent = words[0];
+  let done = 0, p = 0, shown = 0, swap = 0, lock = 0, finished = false;
+  let held = false, pid = -1, curY = 0, prevY = 0, lastT = performance.now(), k = 1;
+  let speed = 0, fastT = 0, slowT = 0, nudge = 0, runT = 0, stripAcc = 0, tickAcc = 0, needleX = 0;
+  // What the DOM shows right now, so a frame only touches what changed (Infinity: the first frame always draws).
+  let drawnTop = Infinity, drawnF = -1, drawnX = Infinity, drawnZone = "", drawnHint = "", running = false, idle = true;
+  const strips = new Set<HTMLElement>();
   const strip = () => {
+    if (strips.size >= 36) return;
     const s = el("i", "sh-strip", win);
+    strips.add(s);
     s.style.left = `${rand(4, 92)}%`;
     s.style.background = pick(["#ffffff", "#ece6ff", "#fff1b8"]);
     gsap.fromTo(s, { top: "-30%", rotation: rand(-20, 20) }, {
       top: `${rand(45, 80)}%`, rotation: rand(-70, 70), duration: rand(0.35, 0.6), ease: "power1.in",
-      onComplete: () => { gsap.to(s, { opacity: 0, duration: 0.3, onComplete: () => s.remove() }); }
+      onComplete: () => { gsap.to(s, { opacity: 0, duration: 0.3, onComplete: () => { s.remove(); strips.delete(s); } }); }
     });
   };
-  const render = () => {
-    doc.style.top = `${-20 + p * 124}%`;
-    const f = (done + p) / docs;
-    fill.style.height = `${8 + 80 * f}%`;
-    api.progress(f);
+  /** Where a feed speed sits on the gauge: TOO SLOW is the first 30%, JUST RIGHT the next 40%, TOO FAST the rest. */
+  const gaugeAt = (sp: number) =>
+    sp <= LO ? (0.3 * Math.max(0, sp)) / LO : sp <= HI ? 0.3 + (0.4 * (sp - LO)) / (HI - LO) : Math.min(1, 0.7 + (0.3 * (sp - HI)) / 200);
+  const release = () => {
+    if (!held) return;
+    held = false;
+    try { if (S.hasPointerCapture(pid)) S.releasePointerCapture(pid); } catch { /* already released */ }
+    pid = -1;
+    fastT = slowT = 0;
+    S.classList.remove("drag");
   };
-  render();
-  const press = () => {
-    if (swap > 0 || done >= docs) return;
-    pressKey(key);
-    p += 1 / per;
-    api.sfx("tick");
-    gsap.fromTo(head, { x: rand(-5, 5), y: 2 }, { x: 0, y: 0, duration: 0.2, ease: "elastic.out(1.2, 0.3)" });
-    for (let i = 0; i < 3; i++) strip();
-    if (p >= 1) {
-      done++;
-      api.sfx("good");
-      api.pop(280, 96, "SHREDDED!", "#a9adc9");
-      for (let i = 0; i < 10; i++) strip();
-      if (done >= docs) { p = 0; render(); api.win(); return; }
-      p = 0;
-      swap = 0.3;
-      stamp.textContent = words[done % words.length];
-      render();
-      gsap.fromTo(doc, { yPercent: -60, opacity: 0 }, { yPercent: 0, opacity: 1, duration: 0.3, ease: "back.out(1.6)" });
+  const feed = (dy: number) => {
+    p += dy / TRAVEL;
+    runT = 0.12;
+    stripAcc += dy;
+    while (stripAcc >= 11) { stripAcc -= 11; strip(); }
+    if ((tickAcc += dy) >= 30) { tickAcc = 0; api.sfx("tick"); }
+    if (p < 1) return;
+    done++;
+    p = shown = 0;
+    api.sfx("good");
+    api.pop(280, 62, "SHREDDED!", "#a9adc9");
+    for (let i = 0; i < 8; i++) strip();
+    if (done >= docs) {
+      finished = true;
+      doc.style.opacity = "0";
+      release();
+      api.win();
       return;
     }
-    render();
+    swap = 0.3;
+    stamp.textContent = words[done % words.length];
+    gsap.fromTo(doc, { yPercent: -60, opacity: 0 }, { yPercent: 0, opacity: 1, duration: 0.3, ease: "back.out(1.6)" });
   };
-  S.addEventListener("pointerdown", press);
+  // Too fast: the page backs out a good way, the drag is dropped and the head rattles for a moment.
+  const jam = () => {
+    release();
+    lock = 0.6;
+    p = Math.max(0, p - 0.3);
+    head.classList.add("jam");
+    api.sfx("bad");
+    api.shake();
+    api.pop(280, 62, "TOO FAST! JAMMED!", "#c4382c");
+  };
+  const stall = () => {
+    slowT = 0;
+    p = Math.max(0, p - 0.15);
+    api.sfx("bad");
+    api.pop(280, 62, "TOO SLOW! IT STALLED", "#c4382c");
+  };
+  const draw = (dt: number) => {
+    // The page follows the hand 1:1 going in, and slides back when it jams or stalls.
+    shown = p >= shown ? p : shown + (p - shown) * Math.min(1, dt * 12);
+    const top = -20 + (shown * TRAVEL * 100) / CLIP;
+    if (Math.abs(top - drawnTop) > 0.02) { drawnTop = top; doc.style.top = `${top.toFixed(2)}%`; }
+    const f = (done + p) / docs;
+    if (f !== drawnF) { drawnF = f; fill.style.height = `${8 + 80 * f}%`; api.progress(f); }
+    const want = lock > 0 ? 1 : held ? gaugeAt(speed) : 0;
+    needleX += (want - needleX) * Math.min(1, dt * 22);
+    if (Math.abs(needleX - drawnX) > 0.001) { drawnX = needleX; needle.style.left = `${(needleX * 100).toFixed(2)}%`; }
+    const zone = lock > 0 ? "2" : !held || speed < BACK ? "" : speed > HI ? "2" : speed >= LO ? "1" : "0";
+    if (zone !== drawnZone) { drawnZone = zone; gauge.dataset.z = zone; }
+    const run = (runT -= dt) > 0;
+    if (run !== running) { running = run; head.classList.toggle("run", run); }
+    const free = !held && lock <= 0 && !finished;
+    if (free !== idle) { idle = free; drag.classList.toggle("off", !free); }
+    const hint = finished ? "" : held && slowT > 0.3 ? "Keep it moving!" : nudge > 0 ? "Grab the paper and drag it down!" : "";
+    if (hint !== drawnHint) { drawnHint = hint; api.hint(hint); }
+  };
+  draw(0);
+  const down = (e: PointerEvent) => {
+    if (e.button !== 0 || held || lock > 0 || finished) return;
+    e.preventDefault();
+    held = true;
+    pid = e.pointerId;
+    curY = prevY = e.clientY;
+    lastT = performance.now();
+    speed = fastT = slowT = 0;
+    k = unitsPerPx(S, "y");
+    try { S.setPointerCapture(pid); } catch { /* the window listeners still follow it */ }
+    S.classList.add("drag");
+  };
+  const move = (e: PointerEvent) => {
+    if (!held || e.pointerId !== pid) return;
+    // The button came up somewhere we never heard about.
+    if (e.pointerType === "mouse" && !(e.buttons & 1)) { release(); return; }
+    curY = e.clientY;
+  };
+  const up = (e: PointerEvent) => { if (e.pointerId === pid) release(); };
+  S.addEventListener("pointerdown", down);
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", up);
+  window.addEventListener("blur", release);
   return {
     update(dt) {
-      swap -= dt;
-      if (p > 0 && swap <= 0) { p = Math.max(0, p - dt * 0.22); render(); }
+      const now = performance.now();
+      swap = Math.max(0, swap - dt);
+      nudge = Math.max(0, nudge - dt);
+      if (lock > 0 && (lock -= dt) <= 0) head.classList.remove("jam");
+      if (held) {
+        // Feed speed: the downward pointer velocity, sampled each frame and smoothed over ~80 ms of real time. A long
+        // frame just averages over its whole length, so a hitch never reads as a flick or a jump, and the jam and
+        // stall clocks run on the host's capped dt, so one slow frame can't trip them on its own.
+        const rdt = Math.max(0.001, (now - lastT) / 1000), dy = (curY - prevY) * k, vel = dy / rdt;
+        prevY = curY;
+        speed += (vel - speed) * (1 - Math.exp(-rdt / 0.08));
+        if (swap <= 0) {
+          fastT = speed > HI ? fastT + dt : 0;
+          if (fastT > 0.08 || (dy > 36 && vel > 1200)) jam();
+          // In the band the page follows the hand; a brief spike over it feeds no faster than the band allows.
+          else if (speed >= LO) { slowT = 0; if (dy > 0) feed(speed > HI ? Math.min(dy, HI * rdt) : dy); }
+          // Winding back up for the next stroke isn't stalling.
+          else if (speed < BACK) slowT = 0;
+          else if ((slowT += dt) > 1.4) stall();
+        }
+      }
+      lastT = now;
+      draw(dt);
     },
-    key(e) { if (e.code === "Space" && !e.repeat) press(); }
+    // Old habits: SPACE does nothing here, so say what does.
+    key(e) { if (isPress(e) && !finished) nudge = 1.8; },
+    destroy() {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("blur", release);
+      gsap.killTweensOf([doc, ...strips]);
+      strips.clear();
+    }
   };
 }
 
@@ -1231,14 +1460,14 @@ function emailGame(api: Api, o: MiniOpts): Game {
 const THEMES: Record<string, { accent: string; instr: string; make: (api: Api, o: MiniOpts) => Game; light?: boolean }> = {
   plant: { accent: "#4b9a63", instr: "The plant won't sit still. Keep the watering can over it!", make: plantGame },
   print: { light: true, accent: "#6aa3b4", instr: "Press <b>SPACE</b> when the page lines up with the yellow outline.", make: printGame },
-  shred: { accent: "#5b6380", instr: "Mash <b>SPACE</b> to feed the evidence into the shredder!", make: shredGame },
+  shred: { accent: "#5b6380", instr: "Drag the paper down into the shredder. Not too fast, not too slow!", make: shredGame },
   coffee: { accent: "#c97a3a", instr: "Click the steam leaks to tighten them!", make: coffeeGame },
   presentation: { accent: "#2f4f8f", instr: "Press <b>SPACE</b> when the GROWTH slide comes up.", make: deckGame },
   memos: { accent: "#c4382c", instr: "Hold the mouse button and scribble on the signature line.", make: memoGame },
   server: { accent: "#3f8f86", instr: "Drag each cable to the port of the same colour.", make: serverGame },
   emails: { light: true, accent: "#d8a93b", instr: "Type the reply. Every key counts!", make: emailGame },
   jam: { light: true, accent: "#8f97a3", instr: "Wiggle the page out: alternate <b>A</b> and <b>D</b> (or the arrows). Same side twice rips it!", make: jamGame },
-  wifi: { accent: "#3f8f86", instr: "Watch the lights, then press them in the same order (<b>1</b>-<b>4</b> or click).", make: wifiGame },
+  wifi: { accent: "#3f8f86", instr: "Drag sideways or hold <b>A</b>/<b>D</b> to aim the antennas. Keep the bars green!", make: wifiGame },
   mail: { light: true, accent: "#2f4f8f", instr: "Send each envelope to its department: click a cubby or press <b>1</b>-<b>4</b>.", make: mailGame },
   board: { light: true, accent: "#4b9a63", instr: "Hold the mouse and scrub the board clean. Don't touch the CEO's note!", make: boardGame },
   keypad: { accent: "#5b6380", instr: "Punch in the 4-digit code. Clues are hidden in today's chores.", make: keypadGame }

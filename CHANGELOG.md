@@ -84,6 +84,13 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Fix (Gameplay): a boss day could end without the boss if the quota was met before he'd stepped out of the lift.
   The day now waits for the boss to turn up and be fired.
 - Fix (UI): every boss was announced as "THE CONSULTANT HAS BEEN LET GO" when fired; it now uses the boss's name.
+- Chores: **Reset the Wi-Fi** is no longer a memory game (the light sequences kept getting longer). Now you aim the
+  router's antennas (drag sideways, or hold A / D) to find the signal and hold full bars until it connects. The sweet
+  spot drifts, and every few seconds office interference ("Someone microwaved fish!") knocks it somewhere new, with a
+  burst of static first. Losing the signal for too long costs a second. Later days only make it longer, not harder.
+- Chores: **Shred the Evidence** is a drag now: pull each document down into the slot at a steady speed. A gauge
+  shows TOO SLOW / JUST RIGHT / TOO FAST: too fast jams it (the page backs out and costs a second), holding it too
+  slowly stalls it (same). Letting go never costs anything.
 - UI: **cheat sheet** for debugging. On the Performance Review, type the Konami code (up up down down left right left
   right B A) and a "CONFIDENTIAL" sheet opens: every upgrade with its logo, rarity and description and +/- buttons
   (rarity / chore / owned filters and a search box), every gun with an Owned box, and a God Mode switch. Whatever you
