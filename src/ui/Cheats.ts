@@ -9,6 +9,8 @@ import type { UI } from "./UI";
 
 /** Up up down down left right left right B A. */
 const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "KeyB", "KeyA"];
+/** A key matches a step by its physical position (e.code) or by what it types (e.key), so any keyboard layout works. */
+const isStep = (e: KeyboardEvent, step: string) => e.code === step || e.key === step || (step.startsWith("Key") && e.key.toLowerCase() === step.slice(3).toLowerCase());
 /** A freshly opened cheat sheet ignores clicks this long (ms), so a stray click can't change anything. */
 const GUARD_MS = 350;
 
@@ -54,9 +56,9 @@ export function bindKonami(armed: () => boolean, onCode: () => void): () => void
   const onKey = (e: KeyboardEvent) => {
     if (e.repeat || /^(Shift|Control|Alt|Meta)/.test(e.code)) return;
     if (closeOpen || !armed() || !document.getElementById("review")) { step = 0; return; }
-    if (e.code === KONAMI[step]) step++;
+    if (isStep(e, KONAMI[step])) step++;
     // A wrong key starts over, unless it's Up: that begins the code again (and Up Up Up still counts).
-    else step = e.code === KONAMI[0] ? (step === 2 ? 2 : 1) : 0;
+    else step = isStep(e, KONAMI[0]) ? (step === 2 ? 2 : 1) : 0;
     if (step < KONAMI.length) return;
     step = 0;
     // The final key belongs to the sheet, not the game.
@@ -85,7 +87,7 @@ const perkHtml = (p: PerkDef) => `<div class="ch-perk r-${p.rarity}" data-id="${
       <div class="ch-nm"><b>${esc(p.name)}</b><span class="ch-rar">${p.rarity.toUpperCase()}</span></div>
       <p>${esc(p.desc)}</p>
       <div class="ch-ft">
-        <span class="ch-tags">${p.stage === "chore" ? `<i class="ch-tag chore">stage: chore</i>` : ""}${p.requires ? `<i class="ch-tag need">needs ${esc(WEAPON_DEFS[p.requires].name)}</i>` : ""}</span>
+        <span class="ch-tags">${p.stage === "chore" ? `<i class="ch-tag chore">stage: chore</i>` : ""}${p.requires ? `<i class="ch-tag need">needs ${esc(WEAPON_DEFS[p.requires].name)}</i>` : ""}${p.days ? `<i class="ch-tag days">${p.days} fights</i>` : ""}<i class="ch-tag lock hidden">${ICON.lock}<span></span></i></span>
         <span class="ch-ctl"><button class="ch-step dec" data-act="dec" aria-label="Remove one ${esc(p.name)}">${MINUS_SVG}</button><b class="ch-n"></b><button class="ch-step inc" data-act="inc" aria-label="Add one ${esc(p.name)}">${PLUS_SVG}</button></span>
       </div>
     </div>`;
@@ -172,9 +174,14 @@ export function showCheats(ui: UI, h: CheatHooks): boolean {
   const paintPerk = (p: PerkDef) => {
     const row = rows.get(p.id);
     if (!row) return;
-    const n = GameState.stack(p.id), can = GameState.canTake(p);
+    const lock = GameState.lockedBy(p);
+    const n = GameState.stack(p.id), can = GameState.canTake(p) && !lock;
     row.classList.toggle("own", n > 0);
     row.classList.toggle("max", !can);
+    // Locked out by an upgrade you own (Open-Plan Office makes Desk Jockey's dodge-roll shoves impossible).
+    const tag = row.querySelector<HTMLElement>(".ch-tag.lock")!;
+    tag.classList.toggle("hidden", !lock);
+    if (lock) $("span", tag).textContent = `locked by ${lock.name}`;
     $(".ch-n", row).textContent = `${n}/${p.max}`;
     $<HTMLButtonElement>(".dec", row).disabled = n <= 0;
     $<HTMLButtonElement>(".inc", row).disabled = !can;
@@ -217,7 +224,8 @@ export function showCheats(ui: UI, h: CheatHooks): boolean {
     else GameState.removePerk(p.id);
     if (GameState.stack(p.id) === before) return;
     sfx("click");
-    paintPerk(p);
+    // Anything it locks (or unlocks) changes too.
+    PERKS.forEach(paintPerk);
     paintStats();
     pop($(".ch-n", row));
   };

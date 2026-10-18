@@ -27,9 +27,12 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Fix (UI): more dead space past the office's outer walls. In a corner the camera used to stop at the edge of the map,
   so you ended up hidden under the HUD (the to-do note, hearts or minimap); now it can keep scrolling and you stay in
   the open part of the screen.
-- UI: the end-of-day internal memo is one line now: "**Due to budget cuts:** the Hatchet Man makes the cuts himself."
-  (written once, with the single biggest change for tomorrow: a boss, a new kind of coworker, or the chore load), plus
-  tomorrow's quota. No more four bullet points that all start with "Due to budget cuts". The PA reads the same line.
+- UI: the end-of-day internal memo is two short lines instead of four bullet points that all started with "Due to
+  budget cuts". The first is the headline, written once: "**Due to budget cuts:** the Hatchet Man makes the cuts
+  himself." (the single biggest change for tomorrow: a boss, a new kind of coworker, or the chore load). The second has
+  everything else you need for tomorrow: "Tomorrow: Vacations are cancelled (expect burnouts) · 5 chores (one more) ·
+  +4s on the clock · quota 22." (a second new coworker type if there is one, how many chores and whether there's one
+  more or they're longer, extra Crunch Time, the quota). It never says the same thing twice. The PA reads the headline.
 - Gameplay: HR Directors who slip in a puddle keep their riot shield in hand and spin round with it, instead of the
   shield fading away. Zapped in a live puddle, they spin too. (The shield still can't block while they're down; a
   keyboard bonk still knocks it aside.)
@@ -54,7 +57,7 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Gameplay: coworkers can't stand inside each other or inside you any more. They push each other apart (bosses and
   riot shields stand their ground), step out of your way, and are never shoved into a wall or a desk. A charging boss
   still ploughs through people, and a dodge-roll still slips through a crowd.
-- Gameplay: new upgrade **Open-Plan Office** (rare): your dodge becomes a quick, shorter dash (about 115 px instead
+- Gameplay: new upgrade **Open-Plan Office** (epic): your dodge becomes a quick, shorter dash (about 115 px instead
   of the roll's 150) that phases straight through interior walls (drywall, concrete, glass) and desks, with a trail of
   ghostly after-images. The whole path is checked before you move, so it can't go wrong: it stops at the building's
   outer walls, at the code-locked door and at the edge of the locked room (you can't phase in there), and it never
@@ -103,6 +106,29 @@ When a batch ships, the Unreleased lines move under a new version heading with t
   game (no accidental mute). Guns you already own can't be bought again, and maxed offers show as MAXED.
 - Fix (Gameplay): coworkers' melee reach against another coworker (a Blame Game scapegoat, an ally) now measures
   from that coworker's edge, so a big one standing right there can be hit.
+- Balance: **Electric Personality** (every puddle is live) is epic now instead of rare, so it turns up less often, and
+  it only lasts for your next **2 fights**; then it wears off ("Electric Personality has worn off" when the second
+  day is cleared) and can turn up again later. The cheat sheet tags it "2 fights".
+- Balance: **Open-Plan Office** is epic now (it was rare) and costs 28. Phasing through a **wall** has a 1.2 s
+  cooldown (Agile Methodology shortens it like the dodge). A dash on cooldown still phases through desks but stops at
+  the wall. A small WALL light next to the dodge pips shows when the next one can go through walls. The description
+  says so.
+- Gameplay: Open-Plan Office works with every other dodge upgrade. Cubicle Ninja, Wet Floor Sign, Burnout Culture,
+  Paper Trail, Hot Desking and Office Romance all trigger on a phase dash, and the dash is fast enough to skip
+  past things in one frame, so Ninja and the trails sweep the whole stretch it crossed (trails only land on open
+  floor, never inside a wall). **Desk Jockey** is locked while you have it (a phase dash goes through desks instead
+  of shoving them): it isn't offered any more, and if it was on the table when you bought Open-Plan Office, its
+  clipboard is stamped LOCKED with a padlock. The cheat sheet shows a padlock tag on it ("locked by Open-Plan
+  Office").
+- Gameplay: **live puddles hurt over time** instead of killing on the spot. Standing in one does about 26 damage a
+  second (more with Hazard Pay), slows you to a wade and gives a jolt (a short stun) every 1.6 s, so a coworker who
+  gets out quickly survives. AI robots still short out and blow up. A **boss** stuck in live water for 3 seconds
+  gets **INSULATED** for 4 seconds (no damage, no stun) so he can walk out of it.
+- Fix (UI): the Konami code on the Performance Review is matched by the key you type as well as its position on the
+  keyboard, so it works on any keyboard layout and with the number-pad arrows.
+- Balance: later days are a little easier on chores and time. At most 6 chores a day (was 7), each chore grows about
+  20% less per level and stops growing after 6 levels, and from day 4 you get **+4 s of Crunch Time a day** (up to +20 s
+  by day 8). The day banner and the memo only say "chores take longer" on days they really do.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.

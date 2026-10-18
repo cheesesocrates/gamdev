@@ -94,6 +94,10 @@
 .ch-tag.chore { background: var(--c-sticky); }
 .ch-tag.need { background: #efc6b4; border-color: #8a2b20; color: #8a2b20; }
 .ch-tag.need.ok { background: #bfe0b4; border-color: #2b6340; color: #2b6340; }
+.ch-tag.days { background: #d6e4f2; }
+.ch-tag.lock { display: inline-flex; align-items: center; gap: 3px; background: #e4dccb; border-color: #6c7482; color: #4a4f5c; }
+.ch-tag.lock.hidden { display: none; }
+.ch-tag.lock svg { width: 12px; height: 12px; display: block; }
 .ch-ctl { flex: none; display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .ch-step { width: 30px; height: 28px; display: grid; place-items: center; padding: 0; border: 2px solid var(--c-ink); border-radius: 3px; background: var(--c-paper); box-shadow: 0 3px 0 var(--c-ink); cursor: pointer; transition: transform .08s, box-shadow .08s, opacity .15s; }
 .ch-step svg { width: 14px; height: 14px; display: block; }

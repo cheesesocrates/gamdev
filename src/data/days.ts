@@ -32,6 +32,8 @@ export interface DayConfig {
   chores: ChoreId[];
   /** How much longer each chore's mini-game runs (0 = baseline). */
   lengthLevel: number;
+  /** Seconds added to Crunch Time today. */
+  extraTime: number;
   /** What got harder today compared to yesterday. */
   growth: "more" | "longer" | null;
   boss: boolean;
@@ -47,8 +49,13 @@ export interface DayConfig {
 }
 
 const CHORE_ORDER: ChoreId[] = ["emails", "print", "shred", "coffee", "presentation", "memos", "server", "plant", "jam", "wifi", "mail", "board"];
-/** Twelve chores to draw from, but never more than seven on one day's list. */
-const MAX_CHORES = 7;
+/** Twelve chores to draw from, but never more than six on one day's list. */
+const MAX_CHORES = 6;
+
+/** How much longer each chore's mini-game runs at a length level (it stops growing at level 6). */
+export const choreLength = (level: number) => 1 + Math.min(level, 6) * 0.28;
+/** Extra Crunch Time on later days: +4 s a day from day 4, at most +20 s. */
+export const extraCrunch = (day: number) => Math.min(20, Math.max(0, (day - 3) * 4));
 
 /**
  * Day 1 is three quick chores so the fight comes sooner. After that the load alternates between two knobs:
@@ -82,7 +89,7 @@ export function dayConfig(day: number, prevChores?: ChoreId[]): DayConfig {
   const tier = Math.floor(d / RUN_DAYS);
   const load = choreLoad(day);
   const prevLoad = choreLoad(day - 1);
-  const growth = day <= 1 ? null : load.count > prevLoad.count ? "more" : "longer";
+  const growth = day <= 1 ? null : load.count > prevLoad.count ? "more" : choreLength(load.lengthLevel) > choreLength(prevLoad.lengthLevel) ? "longer" : null;
   const weights: Partial<Record<EnemyType, number>> = { intern: 60, accountant: 25 };
   if (day >= 2) Object.assign(weights, { intern: 40, fulltime: 25, accountant: 22, manager: 12, hr: 4 });
   if (day >= 3) Object.assign(weights, { intern: 30, fulltime: 26, accountant: 20, manager: 14, hr: 6, burnout: 12 });
@@ -100,6 +107,7 @@ export function dayConfig(day: number, prevChores?: ChoreId[]): DayConfig {
     speedMult: 1 + Math.min(0.25, d * 0.035),
     chores: rollChores(load.count, prevChores),
     lengthLevel: load.lengthLevel,
+    extraTime: extraCrunch(day),
     growth,
     boss,
     bossType,

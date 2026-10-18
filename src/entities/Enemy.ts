@@ -61,6 +61,13 @@ export class Enemy {
   inWater = false;
   /** An AI robot that walked into water: seconds until it blows (0 = fine). */
   shortT = 0;
+  /** Seconds spent standing in live water in one go (a boss stuck that long gets insulated). */
+  private liveT = 0;
+  /** A boss who shrugs off live water for a while, so he can walk out of it. */
+  private insulated = 0;
+  /** Live-water damage piling up between ticks. */
+  private zapAcc = 0;
+  private zapTick = 0;
   private shortFx = 0;
   fireTickCd = 0;
 
@@ -1033,14 +1040,38 @@ export class Enemy {
       if (this.soaked <= 0 && chance(0.35)) g.fx.text(this.x, this.y - 30, "SOAKED", { color: "#7fd8ff", size: 13, dur: 0.6 });
       this.soaked = 4;
     }
-    if (hz.isElectric(this.x, this.y) && this.shockCd <= 0) {
-      this.shockCd = 0.9;
-      this.stun = Math.max(this.stun, 1.4);
-      g.fx.burst("zap", this.x, this.y, 10);
-      g.fx.light(this.x, this.y, 0x6fd8ff, 1.4, 0.15);
-      g.audio.play("zap", { vol: 0.35, minGap: 70 });
-      if (g.hitEnemy(this, 40 * hm, { angle: 0, kind: "zap", x: this.x, y: this.y, knock: 0 })) { g.trapKill(this.x, this.y); return; }
-    } else if (this.inWater && this.slipCd <= 0 && this.slip <= 0 && this.shortT <= 0 && !this.def.boss) {
+    // Live water: a jolt on the way in, then it burns for as long as they stand in it (they can still wade out,
+    // slowly). Only robots go up in one go. A boss stuck in it for 3 seconds gets insulated for a while and walks clear.
+    const live = this.inWater && hz.isElectric(this.x, this.y);
+    if (this.insulated > 0) this.insulated -= dt;
+    if (live) {
+      this.liveT += dt;
+      if (this.def.boss && this.liveT > 3 && this.insulated <= 0) {
+        this.insulated = 4;
+        this.liveT = 0;
+        g.fx.text(this.x, this.y - this.r - 30, "INSULATED", { color: "#9fe8ff", size: 17, pop: true, dur: 1 });
+        g.audio.play("powerdown", { vol: 0.35, rate: 1.4, minGap: 300 });
+      }
+    } else this.liveT = 0;
+    if (live && this.insulated <= 0 && this.shortT <= 0) {
+      this.slow = Math.max(this.slow, 0.25);
+      if (this.shockCd <= 0) {
+        this.shockCd = 1.6;
+        this.stun = Math.max(this.stun, this.def.boss ? 0.3 : 0.45);
+        g.fx.burst("zap", this.x, this.y, 10);
+        g.fx.light(this.x, this.y, 0x6fd8ff, 1.4, 0.15);
+        g.audio.play("zap", { vol: 0.35, minGap: 70 });
+      }
+      // About 26 a second once soaked (and in a puddle you always are), times Hazard Pay.
+      this.zapAcc += 13 * hm * dt;
+      if ((this.zapTick -= dt) <= 0) {
+        this.zapTick = 0.25;
+        const dmg = this.zapAcc;
+        this.zapAcc = 0;
+        if (chance(0.5)) g.fx.burst("zap", this.x + rand(-8, 8), this.y + rand(-8, 8), 3);
+        if (g.hitEnemy(this, dmg, { angle: 0, kind: "zap", x: this.x, y: this.y, knock: 0, silent: true })) { g.trapKill(this.x, this.y); return; }
+      }
+    } else if (this.inWater && !live && this.slipCd <= 0 && this.slip <= 0 && this.shortT <= 0 && !this.def.boss) {
       const sp = Math.hypot(this.vx, this.vy);
       if (sp > 60) {
         this.slip = (this.def.shield ? 2.4 : 1.0) * (GameState.stats.hazardMult > 1 ? 1.5 : 1);

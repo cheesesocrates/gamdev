@@ -284,8 +284,8 @@ try {
     console.log("hatchet states seen:", [...seen].join(", "));
     console.log("memo lines:");
     for (let d = 1; d <= 9; d++) {
-      const line = await ev((day) => { const h = window.__HT; return h.scene.memoChange(h.dayConfig(day), h.dayConfig(day + 1)); }, d);
-      console.log(d, "->", d + 1, `Due to budget cuts: ${line}.`);
+      const m = await ev((day) => { const h = window.__HT; return h.scene.memoLines(h.dayConfig(day), h.dayConfig(day + 1)); }, d);
+      console.log(d, "->", d + 1, `Due to budget cuts: ${m.headline}. | Tomorrow: ${m.details}.`);
     }
   }
 
@@ -541,16 +541,127 @@ try {
     }
   }
 
-  // The end-of-day memo for a couple of days (one line each).
+  // The end-of-day memo for a couple of days (two lines each), and what every night's memo says.
   if (scenario === "memo") {
     await sleep(700);
     await page.keyboard.press("Space");
     await sleep(1200);
-    for (const day of [1, 2, 5]) {
+    for (let d = 1; d <= 12; d++) {
+      const m = await ev((day) => { const h = window.__HT, a = h.dayConfig(day), b = h.dayConfig(day + 1); return { ...h.scene.memoLines(a, b), chores: b.chores.length, len: b.lengthLevel, extra: b.extraTime, crunch: h.state.crunchSeconds() + b.extraTime }; }, d);
+      console.log(d, "->", d + 1, JSON.stringify(m));
+    }
+    for (const day of [1, 2, 5, 8]) {
       await ev((d) => { const h = window.__HT; h.state.day = d; h.scene.dayCfg = h.dayConfig(d); h.scene.endOfDayMemo(); }, day);
       await sleep(1800);
       await shot(`memo-${day}`);
       await ev(() => window.__HT.scene.ui.closeScreen("memo"));
+    }
+  }
+
+  // Open-Plan Office with the other dodge upgrades: Cubicle Ninja, Wet Floor Sign, Hot Desking, Office Romance; and
+  // the wall cooldown (a second wall right after the first stops you at it; once it's back you go through again).
+  if (scenario === "dashperks") {
+    await ev(() => { window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    const T = 64;
+    const setup = await ev((T) => {
+      const h = window.__HT, s = h.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      h.god(true);
+      for (const id of ["phasedash", "ninja", "wetfloor", "hotdesk", "romance"]) h.give(id, 1);
+      const q = { x: 5.5 * T, y: 13.3 * T };
+      s.world.resolveCircle(q, s.player.r);
+      s.player.x = q.x; s.player.y = q.y; s.player.vx = s.player.vy = 0;
+      // A coworker just past the wall, right in the dash's path.
+      const e = s.spawnEnemy("intern", q.x, q.y - 120, "hostile");
+      e.spawnGrace = 99;
+      window.__mark = e;
+      return { start: [Math.round(q.x), Math.round(q.y)], zone: s.map.zones[s.zoneAt(q.x, q.y)].name, internHp: Math.round(e.hp), deskJockeyLockedBy: h.state.lockedBy({ id: "deskjockey" })?.name ?? null, deskJockeyAvailable: h.state.available({ id: "deskjockey" }), hearts: s.pickups?.list?.length ?? null };
+    }, T);
+    console.log("setup", JSON.stringify(setup));
+    // Hold the direction until the dash has really started (headless frames are slow), then wait for it to land.
+    const dash = async (key) => {
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => (p.dodgeCharges > 0 || Date.now() - t0 > 5000 ? res() : setTimeout(f, 30)); f(); }));
+      await page.keyboard.down(key);
+      await sleep(60);
+      await page.keyboard.down("Space");
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => (p.rolling > 0 || Date.now() - t0 > 3000 ? res() : setTimeout(f, 10)); f(); }));
+      await page.keyboard.up("Space");
+      await page.keyboard.up(key);
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => (p.rolling <= 0 && !p.phasing) || Date.now() - t0 > 3000 ? res() : setTimeout(f, 20); f(); }));
+      await sleep(60);
+    };
+    const where = () => ev(() => {
+      const s = window.__HT.scene, p = s.player, z = s.zoneAt(p.x, p.y), e = window.__mark;
+      const wet = [...s.hazards.waterTiles].length;
+      return { at: [Math.round(p.x), Math.round(p.y)], zone: z >= 0 ? s.map.zones[z].name : "(wall!)", free: s.world.circleFree(p.x, p.y, p.r - 1), wallReady: p.wallReady, internHp: Math.round(e.hp), internStun: +e.stun.toFixed(2), wetTiles: wet, hotShots: p.hotShots, charges: p.dodgeCharges };
+    });
+    await dash("KeyW");
+    console.log("dash 1 (through the wall, through the intern)", JSON.stringify(await where()));
+    await shot("dp01-after-first");
+    // Straight back: the wall is on cooldown, so this one stops at the wall.
+    await dash("KeyS");
+    console.log("dash 2 (wall on cooldown)", JSON.stringify(await where()));
+    // Wait for the wall to be ready again, then through.
+    await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => (p.wallReady || Date.now() - t0 > 8000 ? res() : setTimeout(f, 50)); f(); }));
+    await dash("KeyS");
+    console.log("dash 3 (cooldown over)", JSON.stringify(await where()));
+    await shot("dp02-after-third");
+  }
+
+  // Live water: damage over time (a coworker can wade out), robots blow up, and a boss stuck in it gets insulated.
+  if (scenario === "livewater") {
+    await ev(() => { window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    await ev(() => {
+      const h = window.__HT, s = h.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      h.god(true);
+      const p = s.world.nearestWalkable(10 * 64, 19 * 64);
+      s.player.x = p.x + 400; s.player.y = p.y;
+      s.hazards.flood(p.x, p.y, 14, 0.001);
+      s.hazards.setAllElectric(true);
+      const n = s.spawnEnemy("intern", p.x, p.y, "hostile");
+      n.spawnGrace = 99;
+      const m = s.spawnEnemy("manager", p.x + 40, p.y + 30, "hostile");
+      m.spawnGrace = 99;
+      const r = s.spawnEnemy("robot", p.x - 40, p.y, "hostile");
+      r.spawnGrace = 99;
+      window.__lw = { n, m, r, t0: s.time.now };
+    });
+    const read = () => ev(() => {
+      const s = window.__HT.scene, w = window.__lw;
+      const f = (e) => ({ hp: Math.round(e.hp), dead: e.dead, wet: e.inWater, live: s.hazards.isElectric(e.x, e.y) });
+      return { t: +((s.time.now - w.t0) / 1000).toFixed(2), intern: f(w.n), manager: f(w.m), robot: { ...f(w.r), shortT: +w.r.shortT.toFixed(2) } };
+    });
+    for (let i = 0; i < 14; i++) {
+      const r = await read();
+      if (i % 2 === 0) console.log("live", JSON.stringify(r));
+      if (r.t > 6) break;
+      await sleep(400);
+    }
+    await shot("lw01");
+    // A boss parked in live water: hurt for a while, then insulated for a few seconds.
+    await ev(() => {
+      const s = window.__HT.scene, w = window.__lw;
+      const b = s.spawnEnemy("hatchet", w.n.x, w.n.y, "hostile");
+      b.spawnGrace = 99;
+      s.waves.boss = b;
+      w.b = b; w.bt0 = s.time.now; w.bhp = b.hp;
+    });
+    let ins = null;
+    for (let i = 0; i < 40; i++) {
+      const r = await ev(() => { const s = window.__HT.scene, w = window.__lw, b = w.b; return { t: +((s.time.now - w.bt0) / 1000).toFixed(2), hpLost: Math.round(w.bhp - b.hp), insulated: +b.insulated.toFixed(2), live: s.hazards.isElectric(b.x, b.y) }; });
+      if (i % 3 === 0) console.log("boss", JSON.stringify(r));
+      if (r.insulated > 0 && !ins) { ins = r; await shot("lw02-insulated"); }
+      if (ins && r.t > ins.t + 2) { console.log("boss while insulated", JSON.stringify(r), "hp lost since:", r.hpLost - ins.hpLost); break; }
+      await sleep(300);
     }
   }
 
@@ -894,6 +1005,12 @@ try {
     await click('.ch-perk[data-id="hp"] .dec');
     await click('.ch-perk[data-id="parachute"] .dec');
     console.log("minus hp + parachute", JSON.stringify(await snap()));
+    // Open-Plan Office locks Desk Jockey (with a lock tag); taking it off unlocks it again.
+    const lockTag = () => ev(() => { const t = document.querySelector('.ch-perk[data-id="deskjockey"] .ch-tag.lock'); const row = t.closest(".ch-perk"); return { shown: !t.classList.contains("hidden"), text: t.textContent.trim(), rowMaxed: row.classList.contains("max") }; });
+    await click('.ch-perk[data-id="phasedash"] .inc');
+    console.log("desk jockey with phase dash", JSON.stringify(await lockTag()));
+    await click('.ch-perk[data-id="phasedash"] .dec');
+    console.log("desk jockey without", JSON.stringify(await lockTag()));
     await click('.ch-perk[data-id="hp"] .inc');
     await click('.ch-perk[data-id="parachute"] .inc');
     // The coffee, the laser and one of today's gun offers (which must then be off the table in the review).

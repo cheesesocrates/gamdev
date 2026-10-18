@@ -120,11 +120,14 @@ class GameStateClass {
   stats: Stats = this.computeStats();
   /** Past day 9: the run goes on for as long as you last. */
   endless = false;
+  /** Fights left on upgrades that wear off (PerkDef.days). */
+  perkDays: Record<string, number> = {};
   /** Which boss visits on which day this run (decided up front so tomorrow's memo always matches). */
   private bossPlan = new Map<number, EnemyType>();
 
   reset() {
     this.endless = false;
+    this.perkDays = {};
     this.bossPlan = new Map();
     const pool = shuffle([...BOSS_POOL]);
     this.bossPlan.set(3, pool[0]);
@@ -180,6 +183,7 @@ class GameStateClass {
     const p = PERK_BY_ID[id];
     if (!p || !this.canTake(p)) return;
     this.stacks[id] = this.stack(id) + 1;
+    if (p.days) this.perkDays[id] = p.days;
     if (id === "parachute") this.revivesLeft = 1;
     const prevMax = this.stats.maxHp;
     this.stats = this.computeStats();
@@ -192,7 +196,7 @@ class GameStateClass {
     const n = this.stack(id);
     if (n <= 0) return;
     if (n > 1) this.stacks[id] = n - 1;
-    else delete this.stacks[id];
+    else { delete this.stacks[id]; delete this.perkDays[id]; }
     if (id === "parachute" && n === 1) this.revivesLeft = 0;
     const alive = this.hp >= 1;
     this.stats = this.computeStats();
@@ -201,10 +205,33 @@ class GameStateClass {
     if (alive) this.hp = Math.max(1, this.hp);
   }
 
-  /** Weapon upgrades stay hidden until the player owns that weapon. */
+  /** A fight is over: timed upgrades tick down; the ones that run out come off. Returns their names. */
+  fightOver(): string[] {
+    const gone: string[] = [];
+    for (const id of Object.keys(this.perkDays)) {
+      if (--this.perkDays[id] > 0) continue;
+      delete this.perkDays[id];
+      while (this.stack(id) > 0) this.removePerk(id);
+      const p = PERK_BY_ID[id];
+      if (p) gone.push(p.name);
+    }
+    return gone;
+  }
+
+  /** The upgrade you own that locks this one out (Open-Plan Office bypasses dodge-roll shoves, so Desk Jockey...). */
+  lockedBy(p: PerkDef): PerkDef | null {
+    for (const id of Object.keys(this.stacks)) {
+      const o = PERK_BY_ID[id];
+      if (o && this.stack(id) > 0 && o.locks?.includes(p.id)) return o;
+    }
+    return null;
+  }
+
+  /** Weapon upgrades stay hidden until the player owns that weapon; locked-out upgrades never show. */
   available(p: PerkDef) {
     if (!this.canTake(p)) return false;
     if (p.requires && !this.unlocked[p.requires]) return false;
+    if (this.lockedBy(p)) return false;
     return true;
   }
 

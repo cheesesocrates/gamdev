@@ -46,8 +46,8 @@ export interface GunOffer { id: string; name: string; desc: string; color: strin
 export interface ReviewData {
   bank: number;
   notes: { text: string; kind: "good" | "bad" | "" }[];
-  /** `maxed`: you already have every stack of it (it can't be bought). */
-  offers: { perk: PerkDef; sold: boolean; stacks: number; maxed?: boolean }[];
+  /** `maxed`: you already have every stack of it. `lockedBy`: an upgrade you own makes it pointless. Neither can be bought. */
+  offers: { perk: PerkDef; sold: boolean; stacks: number; maxed?: boolean; lockedBy?: string }[];
   guns: GunOffer[];
   healCost: number;
   canHeal: boolean;
@@ -387,10 +387,12 @@ export class UI {
     });
   }
 
-  setDodge(charges: number, max: number) {
-    this.set("dodge", `${charges}|${max}`, () => {
+  /** `wall`: Open-Plan Office only. Whether the next dash can phase through a wall (undefined: no such upgrade). */
+  setDodge(charges: number, max: number, wall?: boolean) {
+    this.set("dodge", `${charges}|${max}|${wall}`, () => {
       let h = "";
       for (let i = 0; i < max; i++) h += `<i class="${i < charges ? "on" : ""}"></i>`;
+      if (wall !== undefined) h += `<b class="wall ${wall ? "on" : ""}">WALL</b>`;
       $(".dodge .pips", this.root).innerHTML = h;
     });
   }
@@ -744,8 +746,8 @@ export class UI {
       if (!c) return;
       const afford = d.bank >= o.perk.cost;
       const wasSold = c.classList.contains("sold");
-      // Bought (or already maxed out): stamped, greyed out, no price tag, nothing left to click.
-      const maxed = !o.sold && !!o.maxed;
+      // Bought (or maxed out, or locked by an upgrade you own): stamped, greyed out, no price tag, nothing to click.
+      const maxed = !o.sold && (!!o.maxed || !!o.lockedBy);
       c.classList.toggle("sold", o.sold);
       c.classList.toggle("maxed", maxed);
       c.classList.toggle("buyable", !o.sold && !maxed && afford);
@@ -753,7 +755,13 @@ export class UI {
       const own = $(".c-own", c);
       if (own) own.textContent = o.stacks > 0 ? `${o.stacks}/${o.perk.max}` : "";
       if (o.sold && !wasSold) { c.querySelector(".stamp")?.remove(); stamp(c, "APPROVED"); }
-      if (maxed && !c.querySelector(".stamp")) stamp(c, "MAXED", "grey", false);
+      if (maxed && !c.querySelector(".stamp")) {
+        stamp(c, o.lockedBy ? "LOCKED" : "MAXED", "grey", false);
+        if (o.lockedBy) {
+          c.querySelector(".stamp")!.insertAdjacentHTML("afterbegin", `<span class="lk">${ICON.lock}</span>`);
+          c.title = `Locked: ${o.lockedBy} bypasses this`;
+        }
+      }
       if (!maxed && !o.sold) c.querySelector(".stamp.grey")?.remove();
     });
     d.guns.forEach((g, i) => {
@@ -852,13 +860,13 @@ export class UI {
   }
 
   /** End of the day: management's one-line memo about what changes tomorrow (read out over the PA). */
-  showMemo(d: { day: number; change: string; quota: number }, onDone: () => void) {
+  showMemo(d: { day: number; headline: string; details: string }, onDone: () => void) {
     const el = this.screen("memo", "dim", `
       <div class="memo clickable">
         <div class="m-paper">
           <div class="m-head"><span>INTERNAL MEMO</span><span class="m-day">DAY ${d.day}</span></div>
-          <p class="m-line"><b>Due to budget cuts:</b> ${esc(d.change)}.</p>
-          <div class="m-quota">Tomorrow's quota: <b>${d.quota}</b></div>
+          <p class="m-line"><b>Due to budget cuts:</b> ${esc(d.headline)}.</p>
+          <p class="m-sub">Tomorrow: ${d.details.split(" · ").map((t) => `<span>${esc(t)}</span>`).join(" · ")}.</p>
           <div class="m-stamp">BUDGET CUTS</div>
         </div>
         <button class="btn big red" id="mgo">CLOCK IN FOR DAY ${d.day}</button>
@@ -876,7 +884,7 @@ export class UI {
     window.addEventListener("keydown", onKey, true);
     $("#mgo", el).addEventListener("click", go);
     this.slideUp([...el.querySelectorAll(".m-paper, #mgo")]);
-    gsap.from(el.querySelectorAll(".m-line, .m-quota"), { x: -24, opacity: 0, duration: 0.35, delay: 0.45, stagger: 0.18, ease: "power3.out" });
+    gsap.from(el.querySelectorAll(".m-line, .m-sub"), { x: -24, opacity: 0, duration: 0.35, delay: 0.45, stagger: 0.18, ease: "power3.out" });
     gsap.fromTo($(".m-stamp", el), { scale: 3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.28, delay: 1.1, ease: "power4.in", onComplete: () => this.sfx?.("stamp") });
   }
 

@@ -15,7 +15,7 @@ import { Player, PlayerInput } from "../entities/Player";
 import { CEO_LEAP_R, CEO_PHASES, Enemy } from "../entities/Enemy";
 import { Projectiles } from "../entities/Projectiles";
 import { Pickups } from "../entities/Pickups";
-import { CHORE_INFO, ChoreId, DayConfig, dayConfig } from "../data/days";
+import { CHORE_INFO, ChoreId, DayConfig, choreLength, dayConfig } from "../data/days";
 import { BOSS_INFO, ENEMIES, EnemyType } from "../data/enemies";
 import { buildOfficeSfx } from "../systems/OfficeSfx";
 import { Speakers } from "../systems/Speakers";
@@ -487,7 +487,7 @@ export class GameScene extends Phaser.Scene {
     this.resetWorldForDay(day, cfg);
     this.ui.initMinimap(this.map, this.world);
     this.spawnNpcs(this.dayCfg.npcs);
-    this.crunchTotal = GameState.crunchSeconds();
+    this.crunchTotal = GameState.crunchSeconds() + this.dayCfg.extraTime;
     this.crunchLeft = this.crunchTotal;
     this.quota = this.dayCfg.quota;
     this.hurryVoiced = false;
@@ -569,7 +569,7 @@ export class GameScene extends Phaser.Scene {
 
   startMini(chore: ChoreId, onDone: () => void) {
     if (this.mini || this.phase !== "crunch") return;
-    const len = Math.max(0.5, (1 + this.dayCfg.lengthLevel * 0.35) * (0.6 + 0.4 * GameState.stats.interactMult));
+    const len = Math.max(0.5, choreLength(this.dayCfg.lengthLevel) * (0.6 + 0.4 * GameState.stats.interactMult));
     this.interactProgress = 0;
     this.ui.setPrompt(null);
     this.zoomMini();
@@ -712,7 +712,7 @@ export class GameScene extends Phaser.Scene {
     this.ui.showReview({
       bank: GameState.bank,
       notes: this.reviewNotes,
-      offers: this.reviewOffers.map((o) => ({ ...o, stacks: GameState.stack(o.perk.id), maxed: !o.sold && !GameState.canTake(o.perk) })),
+      offers: this.reviewOffers.map((o) => ({ ...o, stacks: GameState.stack(o.perk.id), maxed: !o.sold && !GameState.canTake(o.perk), lockedBy: o.sold ? undefined : GameState.lockedBy(o.perk)?.name })),
       guns: this.reviewGuns.map((g) => ({ ...WEAPON_DEFS[g.id], sold: g.sold, locked: !g.sold && (gunBought || GameState.unlocked[g.id]) })),
       healCost,
       canHeal: GameState.hp < GameState.stats.maxHp,
@@ -733,7 +733,7 @@ export class GameScene extends Phaser.Scene {
       },
       buy: (i) => {
         const o = this.reviewOffers[i];
-        if (!o || o.sold || GameState.bank < o.perk.cost || !GameState.canTake(o.perk)) return;
+        if (!o || o.sold || GameState.bank < o.perk.cost || !GameState.canTake(o.perk) || GameState.lockedBy(o.perk)) return;
         GameState.bank -= o.perk.cost;
         GameState.addPerk(o.perk.id);
         o.sold = true;
@@ -914,6 +914,7 @@ export class GameScene extends Phaser.Scene {
   private dayClear() {
     this.phase = "dayclear";
     this.syncQuota();
+    for (const name of GameState.fightOver()) this.ui.toast(`${name} has worn off`, "#8b95a7", 3);
     this.fx.slowmo(0.3, 1.4);
     this.player.invuln = 99;
     this.player.setArmed(false);
@@ -1000,28 +1001,47 @@ export class GameScene extends Phaser.Scene {
   private endOfDayMemo() {
     const today = this.dayCfg;
     const next = dayConfig(GameState.day + 1, today.chores);
-    const change = this.memoChange(today, next);
+    const memo = this.memoLines(today, next);
     this.phase = "memo";
     this.ui.setHudMode("none");
-    this.ui.showMemo({ day: next.day, change, quota: next.quota }, () => {
+    this.ui.showMemo({ day: next.day, ...memo }, () => {
       this.speakers.cancel();
       this.ui.closeScreen("memo");
       this.startDay(next.day, next);
     });
-    this.speakers.say([`Due to budget cuts: ${change}.`], { chime: "down", caption: false });
+    this.speakers.say([`Due to budget cuts: ${memo.headline}.`], { chime: "down", caption: false });
   }
 
-  /** The single biggest change tomorrow (a boss, a new kind of coworker, or the chore load), for "Due to budget cuts: ...". */
-  memoChange(today: DayConfig, next: DayConfig): string {
+  /**
+   * The night-before memo, two lines: the headline ("Due to budget cuts: <the biggest change>") and the rest of what
+   * you need for tomorrow (a second new threat if there is one, the chores, extra time on the clock, the quota).
+   */
+  memoLines(today: DayConfig, next: DayConfig): { headline: string; details: string } {
     const kind = next.boss ? ENEMIES[next.bossType].bossKind : undefined;
-    if (kind) return BOSS_INFO[kind].memo;
-    if (next.day === RUN_DAYS + 1) return "your contract is now endless";
+    const endless = next.day === RUN_DAYS + 1;
     const order: EnemyType[] = ["robot", "hr", "burnout", "manager", "fulltime"];
     const fresh = order.find((t) => next.weights[t] && !today.weights[t] && NEW_TYPE_MEMO[t]);
-    if (fresh) return NEW_TYPE_MEMO[fresh]!;
-    if (next.growth === "more") return "one more chore on your plate";
-    if (next.growth === "longer") return "every chore runs a little longer";
-    return "the elevators run more often";
+    const more = next.growth === "more", longer = next.growth === "longer";
+    // The headline is the single biggest change: a boss, the endless contract, a new kind of coworker, the chores.
+    const headline = kind ? BOSS_INFO[kind].memo
+      : endless ? "your contract is now endless"
+        : fresh ? NEW_TYPE_MEMO[fresh]!
+          : more ? "one more chore on your plate"
+            : longer ? "every chore runs a little longer"
+              : "the elevators run more often";
+    const parts: string[] = [];
+    // A new kind of coworker the headline had no room for.
+    if (fresh && (kind || endless)) {
+      const t = NEW_TYPE_MEMO[fresh]!;
+      parts.push(t[0].toUpperCase() + t.slice(1));
+    }
+    // (When the headline is already about the chores, don't say it twice.)
+    const choresNews = !!(kind || endless || fresh);
+    parts.push(`${next.chores.length} chores${!choresNews ? "" : more ? " (one more)" : longer ? " (each a bit longer)" : ""}`);
+    const extra = next.extraTime - today.extraTime;
+    if (extra > 0) parts.push(`+${extra}s on the clock`);
+    parts.push(`quota ${next.quota}`);
+    return { headline, details: parts.join(" \u00b7 ") };
   }
 
   private gameOver() {
@@ -1511,41 +1531,50 @@ export class GameScene extends Phaser.Scene {
    * interior walls (drywall, concrete, glass, elevator doors) and furniture, but stops at the building's outer walls,
    * the locked door and the edge of the locked room. It never ends inside anything: a dash that would stop inside a
    * wall or a desk carries on (up to `extra` px) to come out the far side, or falls back to the last open spot before it.
+   * With `walls` off (the wall-phase cooldown) it still goes through desks but stops at walls. `wall` in the result:
+   * the dash really passed through a wall (exact test, so grazing a corner doesn't count).
    */
-  phasePath(x: number, y: number, dx: number, dy: number, r: number, len: number, extra: number): { x: number; y: number } {
+  phasePath(x: number, y: number, dx: number, dy: number, r: number, len: number, extra: number, walls = true): { x: number; y: number; wall: boolean } {
     const fromLocked = this.inLockedRoom(x, y);
-    let ex = x, ey = y;
+    let ex = x, ey = y, crossed = false, wall = false;
     for (let s = 2; s <= len + extra; s += 2) {
       const px = x + dx * s, py = y + dy * s;
       const k = this.phaseProbe(px, py, r, fromLocked);
-      if (k === "stop") break;
-      if (k === "open") {
+      if (k.stop || (k.inWall && !walls)) break;
+      if (k.inWall) crossed = true;
+      if (k.open) {
         ex = px;
         ey = py;
+        wall = crossed;
         if (s >= len) break;
       }
     }
-    return { x: ex, y: ey };
+    return { x: ex, y: ey, wall };
   }
 
-  /** One step of a phase dash: open floor, inside a wall or a desk (keep going), or a hard stop. Uses the circle's bounding box (conservative). */
-  private phaseProbe(px: number, py: number, r: number, fromLocked: boolean): "open" | "wall" | "stop" {
+  /**
+   * One step of a phase dash. `open`: nothing there at all (bounding-box test, conservative: safe to end on).
+   * `inWall`: the circle itself overlaps a wall tile (exact). `stop`: the building's edge or the locked room.
+   */
+  private phaseProbe(px: number, py: number, r: number, fromLocked: boolean): { open: boolean; inWall: boolean; stop: boolean } {
     const tx0 = Math.floor((px - r) / TILE), tx1 = Math.floor((px + r) / TILE);
     const ty0 = Math.floor((py - r) / TILE), ty1 = Math.floor((py + r) / TILE);
     const locked = fromLocked ? -1 : this.vault.lockedZone;
-    let wall = false;
+    let box = false, inWall = false;
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         // The outer walls are the edge of the building: never out of bounds.
-        if (tx <= 0 || ty <= 0 || tx >= MAP_W - 1 || ty >= MAP_H - 1) return "stop";
+        if (tx <= 0 || ty <= 0 || tx >= MAP_W - 1 || ty >= MAP_H - 1) return { open: false, inWall: false, stop: true };
         const t = this.world.tile(tx, ty);
-        if (t === Tile.LOCKED) return "stop";
-        if (locked >= 0 && this.map.zoneGrid[ty * MAP_W + tx] === locked) return "stop";
-        if (t !== Tile.FLOOR) wall = true;
+        if (t === Tile.LOCKED || (locked >= 0 && this.map.zoneGrid[ty * MAP_W + tx] === locked)) return { open: false, inWall: false, stop: true };
+        if (t === Tile.FLOOR) continue;
+        box = true;
+        const cx = clamp(px, tx * TILE, (tx + 1) * TILE), cy = clamp(py, ty * TILE, (ty + 1) * TILE);
+        if ((px - cx) ** 2 + (py - cy) ** 2 < r * r) inWall = true;
       }
     }
-    if (!wall) this.world.queryBox(px - r, py - r, px + r, py + r, (c) => { if (c.solid && c.alive) wall = true; });
-    return wall ? "wall" : "open";
+    if (!box) this.world.queryBox(px - r, py - r, px + r, py + r, (c) => { if (c.solid && c.alive) box = true; });
+    return { open: !box, inWall, stop: false };
   }
 
   /** Somewhere for a coworker to wander off to before 5 PM (never the locked room). */
@@ -2445,7 +2474,7 @@ export class GameScene extends Phaser.Scene {
       active: p.weapon,
       slots: WEAPONS.filter((w) => p.weaponUnlocked(w)).map((w, i) => ({ id: w, key: i + 1, name: WEAPON_DEFS[w].name, color: WEAPON_DEFS[w].color, ...p.ammoFor(w) }))
     });
-    this.ui.setDodge(p.dodgeCharges, st.dodgeCharges);
+    this.ui.setDodge(p.dodgeCharges, st.dodgeCharges, st.phaseDash ? p.wallReady : undefined);
     this.ui.setPerks(GameState.stacks, PERK_BY_ID);
     if (this.phase === "crunch") {
       this.ui.setClock(formatClock(Math.max(0, this.crunchLeft), this.crunchTotal), Math.max(0, this.crunchLeft), this.crunchLeft < 20, this.crunchTotal);

@@ -184,6 +184,9 @@ kbd { display: inline-block; min-width: 1.4em; padding: 1px 5px 0; border: 2px s
 .dodge { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px 6px; background: var(--c-paper); border: 2px solid var(--c-ink); border-radius: 3px; box-shadow: 0 4px 0 var(--c-ink); font: 400 17.5px/1 var(--f-display); }
 .dodge i { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--c-ink); background: #d9d2c0; }
 .dodge i.on { background: var(--c-cyan); }
+.dodge .pips { display: inline-flex; align-items: center; gap: 4px; }
+.dodge b.wall { margin-left: 4px; padding: 2px 4px 0; border: 2px solid var(--c-ink); border-radius: 2px; background: #d9d2c0; color: #8f97a3; font: 400 13px/1 var(--f-display); }
+.dodge b.wall.on { background: #9fd8ff; color: var(--c-ink); }
 .bag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--c-paper); border: 2px solid var(--c-ink); border-radius: 3px; box-shadow: 0 4px 0 var(--c-ink); font-size: 17.5px; }
 
 #prompt { position: absolute; transform: translate(-50%, -100%); display: flex; align-items: center; gap: 9px; padding: 6px 12px 6px 6px; background: var(--c-paper); border: 2px solid var(--c-ink); border-radius: 4px; box-shadow: 0 4px 0 var(--c-ink); font-size: 20px; white-space: nowrap; --pc: var(--c-green); }
@@ -263,6 +266,8 @@ kbd { display: inline-block; min-width: 1.4em; padding: 1px 5px 0; border: 2px s
 .card.sold::after, .card.maxed::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 16px; background: rgba(28, 29, 33, .3); pointer-events: none; }
 .gun.sold::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 3px; background: rgba(28, 29, 33, .18); pointer-events: none; }
 .card .stamp.grey { border-color: #8f97a3; color: #6c7482; }
+.card .stamp .lk { display: inline-block; width: 30px; height: 30px; margin: 0 6px -4px 0; }
+.card .stamp .lk svg { width: 100%; height: 100%; display: block; }
 .card .stamp, .gun .stamp { position: absolute; left: 50%; top: 45%; z-index: 3; padding: 6px 14px 3px; border: 5px solid var(--c-green); border-radius: 6px; background: rgba(247, 244, 234, .92); color: var(--c-green); font: 400 46px/1 var(--f-display); transform: translate(-50%, -50%) rotate(-12deg); pointer-events: none; }
 .screen.guard .btn, .screen.guard .card, .screen.guard .gun, .screen.guard input { pointer-events: none; }
 
@@ -372,8 +377,8 @@ kbd { display: inline-block; min-width: 1.4em; padding: 1px 5px 0; border: 2px s
 .m-head .m-day { font-size: 26px; opacity: .6; }
 .m-line { margin: 20px 0 0; font-size: 28px; line-height: 1.15; }
 .m-line b { color: var(--c-red); font-weight: 400; }
-.m-quota { margin: 14px 0 6px; padding-right: 170px; font-size: 22px; opacity: .7; }
-.m-quota b { font-weight: 400; opacity: 1; }
+.m-sub { margin: 12px 0 8px; padding-right: 170px; font-size: 22px; line-height: 1.2; opacity: .8; }
+.m-sub span { white-space: nowrap; }
 .m-stamp { position: absolute; right: 18px; bottom: 16px; padding: 6px 12px 3px; border: 4px solid var(--c-red); border-radius: 6px; color: var(--c-red); font: 400 30px/1 var(--f-display); transform: rotate(-10deg); opacity: .9; }
 
 /* ---------------------------------------------------------------- cutscene: letterbox + dialogue */
