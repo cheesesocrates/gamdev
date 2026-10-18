@@ -29,8 +29,8 @@ Menus slide up and ignore clicks for half a second, so a stray click never buys 
    glowing stations on your sticky note and press **E**. Every chore is a small mini-game that looks like the job
    (12 of them, up to 6 a day): water a plant that won't sit still, line a page up on the copier, drag documents into
    the shredder at a steady speed, tighten the coffee machine's leaks, stop the deck on the GROWTH slide, sign layoff
-   memos, patch server cables, type a reply-all, unjam a printer, aim the Wi-Fi router's antennas for full bars, sort
-   the mail, clean a whiteboard. **Mistakes cost a second.** Later days add a chore or make them a bit longer.
+   memos, patch server cables, type a reply-all, unjam a printer, keep the Wi-Fi router's antennas on the signal as it
+   drifts, sort the mail, clean a whiteboard. **Mistakes cost a second.** Later days add a chore or make them a bit longer.
    Chores move around: printers, the Wi-Fi router and the mail cart turn up in new rooms and halls every day, and a
    chore can be done at any copier, shredder or whiteboard the to-do list points to. Water coolers and power strips
    also spawn in new places every day, so scout them. Done early? Press **ENTER**: half of the time left is banked as
@@ -50,8 +50,9 @@ Menus slide up and ignore clicks for half a second, so a stray click never buys 
    robots join the payroll." / "Tomorrow: 5 chores (one more) · +4s on the clock · quota 22."), then do it all again.
 
 ### A run
-A run is **nine days**. Day 3 and day 6 each bring a boss drawn from the Hatchet Man, the Cold Caller and the
-Consultant (never the same one twice), and day 9 is the finale against **the CEO**. Beat him and you get a Letter of
+A run is **nine days**. Day 3 and day 6 each bring a boss drawn from the Hatchet Man, the Cold Caller, the
+Consultant and the Head of HR (never the same one twice, and day 3 is never one of the last two you met), and day 9
+is the finale against **the CEO**. Beat him and you get a Letter of
 Promotion: **CASH OUT** (the run counts as complete) or **KEEP WORKING** in endless mode, where a boss still turns up
 every third day, the CEO every ninth, and every nine days they get tougher.
 
@@ -93,7 +94,9 @@ wall to hit them. Some coworkers wait in other rooms and ambush you together. Co
 glass and furniture; dodge so he slams into concrete and he's dizzy. **The Cold Caller** lobs ringing desk phones
 that blow up a second after they land (swat one back with the keyboard), and when hurt, a conference call drops a
 ring of them around you. **The Consultant** brings in interns who shield him (fire them first) and, below half
-health, pivots: a full ring of memos.
+health, pivots: a full ring of memos. **The Head of HR** hides behind a riot shield (he turns slowly: flank him, bank
+shots off walls or bonk it aside), stuns with a megaphone, calls in staff for Mandatory Training, and shield-bashes;
+make him bash into a wall and he's stunned with his guard down.
 
 **The CEO** (day 9) comes down in the lift for a cutscene, then fights in three phases, each with its own share of
 his health. He has his own moves (fans of gold coins, golden-parachute leaps that land on a red ring) and borrows
@@ -176,7 +179,7 @@ upgrade with +/- buttons, every gun, and a God Mode switch; whatever you sign th
 
 **Playtests:** `node tools/playtest.mjs <outDir> <scenario>` boots the game in headless Edge or Chrome and drives a
 scripted session (screenshots plus a log). Scenarios include `full`, `boss`, `ceo`, `ceomoves`, `hatchet`, `phase`,
-`dashperks`, `livewater`, `memo`, `minis`, `cheats`, `fire` and `combat`.
+`dashperks`, `livewater`, `hrboss`, `memo`, `minis`, `cheats`, `fire` and `combat`.
 
 ## Credits
 

@@ -20,6 +20,11 @@
 .m-pop { font: 400 7cqw/1 var(--f-display); white-space: nowrap; pointer-events: none; z-index: 20; text-shadow: 0 4px 0 rgba(0, 0, 0, .45); }
 .m-done { inset: 0; display: grid; place-items: center; z-index: 25; pointer-events: none; background: rgba(255, 246, 224, .35); }
 .m-done span { padding: 1cqw 4cqw; font: 400 12cqw/1 var(--f-display); color: var(--c-green); background: #fff; border: 5px solid var(--c-ink); border-radius: 6px; box-shadow: 0 7px 0 var(--c-ink); }
+/* A second to read the instructions before the chore starts (the bar runs down). */
+.m-ready { inset: 0; display: grid; place-items: center; align-content: center; gap: 2.6cqw; z-index: 24; background: rgba(28, 29, 33, .38); }
+.m-ready span { padding: 1cqw 4cqw; font: 400 9cqw/1 var(--f-display); color: var(--c-ink); background: #fff; border: 5px solid var(--c-ink); border-radius: 6px; box-shadow: 0 7px 0 var(--c-ink); transform: rotate(-3deg); }
+.m-ready i { width: 30cqw; height: 2.4cqw; border: 3px solid var(--c-ink); border-radius: 999px; background: #fff; overflow: hidden; }
+.m-ready b { display: block; width: 100%; height: 100%; background: var(--accent); transform-origin: 0 50%; }
 
 .key { display: grid; place-items: center; min-width: 18cqw; height: 8cqw; padding: 0 2.4cqw; background: #fff; border: 3px solid var(--c-ink); border-radius: 4px; box-shadow: 0 6px 0 var(--c-ink); font: 400 4.1cqw/1 var(--f-display); letter-spacing: 1px; color: var(--c-ink); transition: transform .06s, box-shadow .06s; z-index: 5; pointer-events: none; }
 .key.down { transform: translateY(5px); box-shadow: 0 1px 0 var(--c-ink); background: var(--c-yellow); }
@@ -229,7 +234,6 @@
 .wf-meter { --sig: #e0503f; left: 68.6%; top: 8%; width: 28.4%; height: 76%; box-sizing: border-box; padding: 2cqw 2cqw 2.4cqw; display: flex; flex-direction: column; gap: 1.8cqw; background: #0b1114; border: 3px solid var(--c-ink); border-radius: 1.6cqw; box-shadow: inset 0 0 0 .7cqw #1d2830, 0 .9cqw 0 var(--c-ink); overflow: hidden; }
 .wf-meter.mid { --sig: #e9c25a; }
 .wf-meter.strong { --sig: #6fe08a; }
-.wf-meter.fuzz { --sig: #c9d6dd; }
 .wf-state { color: var(--sig); font: 400 3.6cqw/1 var(--f-display); letter-spacing: .3cqw; text-align: center; white-space: nowrap; text-shadow: 0 0 1.4cqw var(--sig); }
 .wf-bars { flex: 1; display: flex; align-items: flex-end; gap: 1.2cqw; }
 .wf-bars i { position: relative; flex: 1; background: #1d2830; border: 2px solid #2c3a44; border-radius: .6cqw; overflow: hidden; }
@@ -239,14 +243,6 @@
 .wf-bars i:nth-child(4) { height: 80.5%; }
 .wf-bars i:nth-child(5) { height: 100%; }
 .wf-bars b { position: absolute; inset: 0; background: var(--sig); transform: scaleY(0); transform-origin: 50% 100%; }
-.wf-fuzz { position: absolute; inset: 0; opacity: 0; pointer-events: none; background-image: repeating-linear-gradient(0deg, rgba(255, 255, 255, .22) 0 2px, transparent 2px 5px), repeating-linear-gradient(90deg, rgba(0, 0, 0, .45) 0 3px, transparent 3px 8px); background-size: 100% 11px, 13px 100%; }
-.wf-meter.fuzz .wf-fuzz { opacity: .9; animation: wfFuzz .14s steps(2) infinite; }
-@keyframes wfFuzz { 0% { background-position: 0 0, 0 0; } 50% { background-position: 0 6px, 7px 0; } 100% { background-position: 0 3px, 3px 0; } }
-/* Interference callout (what knocked the signal about). */
-.wf-alert { left: 2.6%; top: 4%; padding: 1cqw 2cqw 1.2cqw; background: #fff4c4; border: 3px solid var(--c-ink); border-radius: 1cqw; box-shadow: 0 .8cqw 0 var(--c-ink); color: var(--c-ink); z-index: 6; pointer-events: none; opacity: 0; transform: translateY(-30%) rotate(-2deg) scale(.8); transition: opacity .15s, transform .25s cubic-bezier(.3, 1.6, .5, 1); }
-.wf-alert.on { opacity: 1; transform: rotate(-2deg); }
-.wf-alert b { display: block; color: var(--c-red); font: 400 2.4cqw/1 var(--f-display); letter-spacing: .4cqw; }
-.wf-alert span { display: block; margin-top: .5cqw; font: 400 3.6cqw/1.05 var(--f-display); white-space: nowrap; }
 
 /* ---------------------------------------------------------------- sort the mail */
 .g-mail { background: #e8dcc6; }

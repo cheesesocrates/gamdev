@@ -3,6 +3,9 @@ import { CRUNCH_SECONDS } from "../config";
 import { WEAPONS, WeaponId } from "../data/weapons";
 import { BOSS_POOL, EnemyType } from "../data/enemies";
 
+/** The last two pool bosses you met (across runs), so the next run opens with someone else. */
+const RECENT_BOSSES_KEY = "hostile-takeover-recent-bosses";
+
 /** A run is nine days: bosses on days 3 and 6, the CEO on day 9. Then you can cash out, or keep going (endless). */
 export const RUN_DAYS = 9;
 
@@ -129,9 +132,12 @@ class GameStateClass {
     this.endless = false;
     this.perkDays = {};
     this.bossPlan = new Map();
-    const pool = shuffle([...BOSS_POOL]);
-    this.bossPlan.set(3, pool[0]);
-    this.bossPlan.set(6, pool[1]);
+    // Day 3 is never one of the last two bosses you met; day 6 is any of the others.
+    const recent = this.recentBosses();
+    const fresh = BOSS_POOL.filter((t) => !recent.includes(t));
+    const first = shuffle([...(fresh.length ? fresh : BOSS_POOL)])[0];
+    this.bossPlan.set(3, first);
+    this.bossPlan.set(6, shuffle(BOSS_POOL.filter((t) => t !== first))[0]);
     this.day = 1;
     this.bank = 0;
     this.stacks = {};
@@ -148,6 +154,22 @@ class GameStateClass {
     // A good night's sleep heals half your missing health (rounded up).
     const missing = this.stats.maxHp - this.hp;
     this.hp = Math.min(this.stats.maxHp, this.hp + Math.ceil(missing / 2) + 2);
+  }
+
+  private recentBosses(): EnemyType[] {
+    try {
+      const v = JSON.parse(localStorage.getItem(RECENT_BOSSES_KEY) ?? "[]");
+      return Array.isArray(v) ? v.filter((t): t is EnemyType => BOSS_POOL.includes(t)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** A pool boss just turned up: remember him (the last two) for the next run's plan. */
+  noteBoss(type: EnemyType) {
+    if (!BOSS_POOL.includes(type)) return;
+    const recent = [...this.recentBosses().filter((t) => t !== type), type].slice(-2);
+    try { localStorage.setItem(RECENT_BOSSES_KEY, JSON.stringify(recent)); } catch { /* private window: no memory */ }
   }
 
   /**

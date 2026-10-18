@@ -424,7 +424,8 @@ export class Projectiles {
         g.fx.spray("spark", p.x, p.y, 6, ang + Math.PI, 40, 0xffffff);
         g.audio.play("ping", { vol: 0.25, minGap: 60 });
         g.fx.text(e.x, e.y - 40, "BLOCKED", { color: "#c9d1e6", size: 13, dur: 0.5 });
-        g.tipOnce("shield", "Riot shields block shots from the front. Slip them in water, or bounce shots off a wall to hit them!", "#e9c25a");
+        if (e.def.boss) g.tipOnce("hrshield", "His shield blocks shots from the front. Get round the side, bounce shots off a wall, or bonk it aside with the keyboard!", "#e9c25a");
+        else g.tipOnce("shield", "Riot shields block shots from the front. Slip them in water, or bounce shots off a wall to hit them!", "#e9c25a");
         if (p.bounces > 0) {
           p.bounces--;
           p.vx = -p.vx; p.vy = -p.vy;

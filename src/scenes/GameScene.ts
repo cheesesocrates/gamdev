@@ -1730,6 +1730,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   bossIncoming(type: EnemyType) {
+    GameState.noteBoss(type);
     const def = ENEMIES[type];
     const info = BOSS_INFO[def.bossKind ?? "consultant"];
     this.audio.play("alert", { vol: 0.6 });
@@ -1820,10 +1821,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ================================================================ boss toys
-  /** A red lane on the floor where the Hatchet Man is about to charge (brighter as he commits). */
-  drawChargeLane(x: number, y: number, a: number, r: number, f: number) {
+  /** A red lane on the floor where a boss is about to charge (brighter as he commits). */
+  drawChargeLane(x: number, y: number, a: number, r: number, f: number, len = 900) {
     const g = this.teleGfx;
-    const len = 900, w = r * 1.1;
+    const w = r * 1.1;
     const c = Math.cos(a), s = Math.sin(a), nx = -s * w, ny = c * w;
     const ex = x + c * len, ey = y + s * len;
     g.fillStyle(0xc4382c, 0.08 + 0.2 * f);
@@ -1950,14 +1951,19 @@ export class GameScene extends Phaser.Scene {
     this.hazards.igniteRadius(x, y, R, 2.2);
   }
 
-  /** A charging boss hits whatever is ahead of it: drywall, glass, furniture, traps. */
-  bossSmash(e: Enemy, x: number, y: number, r: number, concrete = false) {
-    this.smashWalls(x, y, r, concrete);
+  /**
+   * A charging boss hits whatever is ahead of it: drywall, glass, furniture, traps. With `walls` off (the Head of
+   * HR's shield bash) the walls and glass stand: he thuds into them.
+   */
+  bossSmash(e: Enemy, x: number, y: number, r: number, concrete = false, walls = true) {
     const tr = Math.ceil(r / TILE) + 1, cx = Math.floor(x / TILE), cy = Math.floor(y / TILE);
-    for (let ty = cy - tr; ty <= cy + tr; ty++) for (let tx = cx - tr; tx <= cx + tr; tx++) {
-      if (this.world.tile(tx, ty) !== Tile.GLASS) continue;
-      const nx = clamp(x, tx * TILE, (tx + 1) * TILE), ny = clamp(y, ty * TILE, (ty + 1) * TILE);
-      if ((nx - x) ** 2 + (ny - y) ** 2 < r * r) this.damageGlass(tx, ty, 99);
+    if (walls) {
+      this.smashWalls(x, y, r, concrete);
+      for (let ty = cy - tr; ty <= cy + tr; ty++) for (let tx = cx - tr; tx <= cx + tr; tx++) {
+        if (this.world.tile(tx, ty) !== Tile.GLASS) continue;
+        const nx = clamp(x, tx * TILE, (tx + 1) * TILE), ny = clamp(y, ty * TILE, (ty + 1) * TILE);
+        if ((nx - x) ** 2 + (ny - y) ** 2 < r * r) this.damageGlass(tx, ty, 99);
+      }
     }
     const hits: FurnObj[] = [];
     this.world.queryBox(x - r, y - r, x + r, y + r, (c) => {

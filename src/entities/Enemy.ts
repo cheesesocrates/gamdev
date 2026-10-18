@@ -4,6 +4,7 @@ import { ENEMIES, EnemyDef, EnemyType, standPose } from "../data/enemies";
 
 const HATCHET_BARKS = ["YOU'RE DONE!", "CLEAR YOUR DESK!", "RESTRUCTURING!", "NOTHING PERSONAL!", "THIS IS A CUT!"];
 const CALLER_BARKS = ["CAN YOU HEAR ME NOW?", "LET'S CIRCLE BACK!", "PER MY LAST CALL...", "HOLD, PLEASE!", "IT'S FOR YOU!"];
+const HR_BASH_BARKS = ["DISCIPLINARY ACTION!", "THIS IS A FORMAL WARNING!", "CONSIDER YOURSELF WRITTEN UP!", "HR WILL SEE YOU NOW!"];
 const CEO_CHARGE_BARKS = ["HOSTILE TAKEOVER!", "I'M BUYING THIS FLOOR!", "MERGERS AND ACQUISITIONS!", "I OWN THESE WALLS!"];
 import { HOSTILE_BARKS, NPC_IDLE } from "../data/lines";
 import { GameState } from "../systems/GameState";
@@ -127,6 +128,8 @@ export class Enemy {
   synergy = 0;
   private pivotCd = 6;
   private pivotWind = 0;
+  /** THE HEAD OF HR: seconds until the next shield bash. */
+  private bashCd = 3;
   /** THE CEO: 1 Quarterly Review, 2 Restructuring, 3 Liquidation. */
   ceoPhase = 1;
   /** Phase change in progress (a speech; he can't be hurt): seconds left. */
@@ -428,7 +431,8 @@ export class Enemy {
     }
 
     const wantFacing = Math.atan2(dy, dx);
-    const turnRate = this.def.shield ? 2.6 : 12;
+    // Riot shields turn slowly (the Head of HR slower still, so you can get round him).
+    const turnRate = this.def.shield ? (this.def.boss ? 1.1 : 2.6) : 12;
     this.facing += Phaser.Math.Clamp(angleDiff(this.facing, wantFacing), -turnRate * dt, turnRate * dt);
 
     // Movement direction: straight at the target if visible, else follow the flow field.
@@ -494,6 +498,11 @@ export class Enemy {
       if (this.consultantAI(dt)) return;
       if (this.stuckTimer > 0.35) g.smashWalls(this.x + mvx * (this.r + 12), this.y + mvy * (this.r + 12), this.r + 16);
     }
+    // THE HEAD OF HR: shield, megaphone, training, disciplinary action.
+    if (this.def.boss && this.def.bossKind === "hr") {
+      if (this.hrAI(dt, d)) return;
+      if (this.stuckTimer > 0.35) g.smashWalls(this.x + mvx * (this.r + 12), this.y + mvy * (this.r + 12), this.r + 16);
+    }
     // THE CEO: three phases of the big finish.
     if (this.def.boss && this.def.bossKind === "ceo") {
       if (this.ceoAI(dt, d)) return;
@@ -510,8 +519,8 @@ export class Enemy {
     }
     if (this.dodgeCd > 0) this.dodgeCd -= dt;
 
-    // HR megaphone: stun cone.
-    if (this.def.megaphone) {
+    // HR megaphone: stun cone. (The Head of HR has his own, see hrAI.)
+    if (this.def.megaphone && !this.def.boss) {
       this.pulseCd -= dt;
       if (this.pulseCd <= 0 && d < 330 && this.hasLos && target === pl) {
         this.pulseCd = rand(4, 6);
@@ -849,6 +858,127 @@ export class Enemy {
       g.audio.play("paper", { vol: 0.6, rate: 0.8 });
     }
     return true;
+  }
+
+  /**
+   * THE HEAD OF HR. A riot shield the size of a door: shots from the front bounce off and he turns slowly, so get
+   * round the side, bank a shot off a wall or bonk the shield aside with the keyboard (bosses don't slip). A megaphone
+   * that stuns, Mandatory Training (he calls in an HR Director and interns), Disciplinary Action (a shield-bash lunge
+   * the way he's facing; into a wall and he's stunned, guard down) and, below half health, Zero Tolerance: a full
+   * ring of megaphone blasts. Returns true while he's busy (winding up, lunging, about to blast).
+   */
+  private hrAI(dt: number, d: number): boolean {
+    const g = this.g, pl = g.player, rate = g.dayCfg.bossRate;
+    // Disciplinary Action: the lunge itself.
+    if (this.charging > 0) {
+      this.charging -= dt;
+      this.attackCd -= dt;
+      const sp = Math.hypot(this.vx, this.vy) || 1;
+      // Furniture goes flying; walls and glass don't give (that's the THUD).
+      g.bossSmash(this, this.x + (this.vx / sp) * (this.r + 20), this.y + (this.vy / sp) * (this.r + 20), this.r + 8, false, false);
+      if (Math.hypot(pl.x - this.x, pl.y - this.y) < this.r + pl.r + 10 && this.attackCd <= 0) {
+        this.attackCd = 1;
+        pl.damage(2, this.x, this.y, "charge", this);
+      }
+      if (chance(0.6)) g.fx.burst("pixel", this.x - this.vx * 0.03, this.y + this.r * 0.5, 2, 0xd8c3a5);
+      if (this.chargeBlocked > 0.07 || this.charging <= 0) {
+        const thud = this.chargeBlocked > 0.07;
+        this.charging = 0;
+        this.chargeBlocked = 0;
+        this.vx *= 0.1;
+        this.vy *= 0.1;
+        this.bashCd = rand(4, 5.5) * rate;
+        if (thud) {
+          // Shield first into the wall: stunned, and the shield's knocked aside.
+          this.stun = Math.max(this.stun, 1.4);
+          g.fx.shake(0.6);
+          g.audio.play("wall", { vol: 0.8 });
+          g.audio.play("ping", { vol: 0.5, rate: 0.6 });
+          g.fx.text(this.x, this.y - this.r - 34, "THUD!", { color: "#e9c25a", size: 28, pop: true, dur: 1 });
+          g.tipOnce("hrthud", "He bashed into the wall: shield down! Hit him now.", "#e9c25a");
+        }
+      }
+      return true;
+    }
+    // ...and its wind-up: he bashes the way the shield points, so step aside (he turns slowly).
+    this.bashCd -= dt;
+    if ((this.bashCd <= 0 && this.hasLos && d > 90 && d < 420) || this.chargeWind > 0) {
+      if (this.chargeWind === 0) {
+        this.say(pick(HR_BASH_BARKS), 1.1, "#c4382c");
+        g.tipOnce("hrbash", "Disciplinary Action: he lunges the way his shield points. Step aside, or let him hit a wall.", "#e9c25a");
+      }
+      this.chargeWind += dt;
+      this.vx *= Math.pow(0.02, dt);
+      this.vy *= Math.pow(0.02, dt);
+      if (this.chargeWind < 0.45) this.chargeAim = this.facing;
+      else this.facing = this.chargeAim;
+      g.drawChargeLane(this.x, this.y, this.chargeAim, this.r, Math.min(1, this.chargeWind / 0.7), 380);
+      if (this.chargeWind > 0.7) {
+        this.chargeWind = 0;
+        this.charging = 0.38;
+        this.stuckTimer = 0;
+        this.chargeBlocked = 0;
+        this.vx = Math.cos(this.chargeAim) * 950;
+        this.vy = Math.sin(this.chargeAim) * 950;
+        g.audio.play("dodge", { vol: 0.6, rate: 0.6 });
+        g.fx.shake(0.25);
+      }
+      return true;
+    }
+    // Zero Tolerance (below half health): a full ring of megaphone blasts, after a moment's warning.
+    if (this.hp < this.maxHp * 0.5) {
+      this.pivotCd -= dt;
+      if (this.pivotCd <= 0 || this.pivotWind > 0) {
+        if (this.pivotWind <= 0) {
+          this.say("ZERO TOLERANCE!", 1.1, "#e9c25a");
+          g.audio.play("megaphone", { vol: 0.6, rate: 0.8 });
+        }
+        this.pivotWind += dt;
+        this.windup = this.pivotWind;
+        this.vx *= Math.pow(0.02, dt);
+        this.vy *= Math.pow(0.02, dt);
+        if (this.pivotWind > 0.55) {
+          this.pivotWind = 0;
+          this.windup = 0;
+          this.pivotCd = rand(8, 10) * rate;
+          const n = 12, off = rand(0, Math.PI * 2);
+          for (let k = 0; k < n; k++) g.projectiles.fireEnemy("wave", this.x, this.y, off + (k / n) * Math.PI * 2, 340, 1, this);
+          g.fx.shake(0.3);
+          g.audio.play("megaphone", { vol: 0.7 });
+        }
+        return true;
+      }
+    }
+    // The megaphone: a wide cone of stunning blasts the way he's facing.
+    this.pulseCd -= dt;
+    if (this.pulseCd <= 0 && d < 460 && this.hasLos) {
+      this.pulseCd = rand(3.2, 4.4) * rate;
+      this.say("ATTENTION ALL STAFF!", 1.2, "#e9c25a");
+      g.audio.play("megaphone", { vol: 0.55 });
+      for (let k = -2; k <= 2; k++) g.projectiles.fireEnemy("wave", this.x, this.y, this.facing + k * 0.2, 380, 1, this);
+    }
+    // Mandatory Training: an HR Director (if he hasn't got one) and interns.
+    this.bossSummonCd -= dt;
+    if (this.bossSummonCd <= 0) {
+      this.bossSummonCd = rand(11, 13) * rate;
+      let mine = 0, hrs = 0;
+      for (const o of g.enemies) if (!o.dead && o.summoner === this) { mine++; if (o.type === "hr") hrs++; }
+      const n = Math.min(4 - mine, 2 + Math.floor(g.dayCfg.day / 6));
+      if (n > 0) {
+        this.say(pick(["MANDATORY TRAINING!", "ALL HANDS MEETING!", "NEW HIRE ORIENTATION!"]), 1.6, "#e9c25a");
+        g.audio.play("alert", { vol: 0.4 });
+        for (let k = 0; k < n; k++) {
+          const a = rand(0, Math.PI * 2);
+          const p = g.safeSpot(this.x + Math.cos(a) * 90, this.y + Math.sin(a) * 90);
+          const o = g.spawnEnemy(k === 0 && hrs === 0 ? "hr" : "intern", p.x, p.y, "hostile");
+          o.spawnGrace = 0.6;
+          o.summoner = this;
+          g.fx.burst("pixel", p.x, p.y, 10, 0xb8bfc9);
+        }
+        g.tipOnce("hrtraining", "Mandatory Training: the Head of HR calls in staff. Fire them, or keep them between you and his megaphone.", "#e9c25a");
+      }
+    }
+    return false;
   }
 
   /**

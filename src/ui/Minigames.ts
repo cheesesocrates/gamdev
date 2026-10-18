@@ -254,30 +254,28 @@ const WIFI_SVG = `<svg class="wf-svg" viewBox="0 0 560 300" aria-hidden="true">
   <path d="M270 224 h34 M270 234 h34 M270 244 h34" stroke="#17191d" stroke-width="3.5" stroke-linecap="round"/>
 </svg>`;
 
-const WIFI_NEWS = ["Someone microwaved fish!", "Bluetooth speaker detected!", "Kevin is streaming in 4K!", "The smart fridge is updating!", "Someone's baby monitor!", "A space heater turned on!", "IT is \"running updates\"!", "The printer joined the network!"];
-
 /**
- * Reset the Wi-Fi: turn the antennas to the sweet spot and hold full bars. The spot drifts, and every few
- * seconds something in the office knocks it somewhere new (the meter fizzes with static first).
+ * Reset the Wi-Fi: find the sweet spot by the bars, then keep the antennas on it while it sweeps slowly left and
+ * right by itself, and hold full bars until it connects.
  */
 function wifiGame(api: Api, o: MiniOpts): Game {
   const S = api.stage;
   const need = 2.2 * o.len;
-  // Later days only take longer: the drift and the interference stop getting worse after day 3.
+  // Later days take longer; the sweep only gets a little quicker, and stops getting quicker after day 3.
   const hard = clamp((o.len - 1) / 0.35, 0, 1);
-  const maxDrift = 7 + 5 * hard;
-  const gap = () => rand(3.4, 4.4) - 0.5 * hard;
-  const LIM = 75, FUZZ = 0.6, PIVOTS = [140, 260];
+  const LIM = 75, PIVOTS = [140, 260];
+  // The sweet spot swings smoothly between two angles either side of a centre (it never jumps).
+  const centre = rand(-12, 12), amp = rand(28, 34) + 4 * hard, omega = (Math.PI * 2) / (rand(7.5, 8.5) - hard);
+  let phase = rand(0, Math.PI * 2);
   S.insertAdjacentHTML("beforeend", WIFI_SVG + `
-    <div class="wf-meter"><div class="wf-state">NO SIGNAL</div><div class="wf-bars">${"<i><b></b></i>".repeat(5)}</div><div class="wf-fuzz"></div></div>
-    <div class="wf-alert"><b>INTERFERENCE!</b><span></span></div>`);
+    <div class="wf-meter"><div class="wf-state">NO SIGNAL</div><div class="wf-bars">${"<i><b></b></i>".repeat(5)}</div></div>`);
   const ants = Array.from(S.querySelectorAll<SVGGElement>(".wf-ant"));
   const waves = Array.from(S.querySelectorAll<SVGGElement>(".wf-waves"));
   const fills = Array.from(S.querySelectorAll<HTMLElement>(".wf-bars b"));
   const led = S.querySelector(".wf-led") as SVGCircleElement;
-  const meter = q(S, ".wf-meter"), label = q(S, ".wf-state"), alert = q(S, ".wf-alert");
-  let angle = 0, target = pick([-1, 1]) * rand(30, 56), driftV = 0, driftGoal = 0, driftT = 0, jumpT = gap() + 0.8;
-  let v = 0, weakT = 0, tickT = 0, holdT = 0, lastDir = 0, alertT = 0, found = false, done = false;
+  const meter = q(S, ".wf-meter"), label = q(S, ".wf-state");
+  let angle = 0, target = clamp(centre + amp * Math.sin(phase), -60, 60);
+  let v = 0, weakT = 0, tickT = 0, holdT = 0, lastDir = 0, found = false, done = false;
   let dragging = false, pid = -1, lastX = 0, k = 1, keyL = false, keyR = false;
   // What the DOM shows right now, so a frame only touches what changed.
   let drawnAngle = 0, drawnZone = "", drawnText = "NO SIGNAL", drawnHint = "", drawnWave = 0, drawnLed = "", drawnF = -1;
@@ -299,13 +297,12 @@ function wifiGame(api: Api, o: MiniOpts): Game {
   const finish = () => {
     done = true;
     stopDrag();
-    meter.classList.remove("fuzz", "mid");
+    meter.classList.remove("mid");
     meter.classList.add("strong");
     fills.forEach((b) => { b.style.transform = "scaleY(1)"; });
     label.textContent = "CONNECTED";
     led.setAttribute("fill", "#6fe08a");
     waves.forEach((w) => w.setAttribute("opacity", "1"));
-    alert.classList.remove("on");
     api.pop(200, 118, "CONNECTED!", "#6fe08a");
     api.win();
   };
@@ -346,33 +343,9 @@ function wifiGame(api: Api, o: MiniOpts): Game {
         holdT += dt;
         angle = clamp(angle + dir * (50 + 55 * Math.min(1, holdT / 0.6)) * dt, -LIM, LIM);
       }
-      // The sweet spot wanders...
-      if ((driftT -= dt) <= 0) { driftT = rand(1.1, 2.3); driftGoal = rand(-maxDrift, maxDrift); }
-      driftV += (driftGoal - driftV) * Math.min(1, dt * 2);
-      target += driftV * dt;
-      if (Math.abs(target) > 60) {
-        target = clamp(target, -60, 60);
-        driftGoal = -Math.sign(target) * Math.abs(driftGoal);
-        driftV = -Math.sign(target) * Math.abs(driftV);
-      }
-      // ...and every few seconds something knocks it somewhere new, after a burst of static.
-      jumpT -= dt;
-      const fuzz = jumpT <= FUZZ;
-      if (fuzz && !meter.classList.contains("fuzz")) {
-        meter.classList.add("fuzz");
-        q(alert, "span").textContent = pick(WIFI_NEWS);
-        alert.classList.add("on");
-        alertT = FUZZ + 1.3;
-        api.sfx("tick");
-      }
-      if (jumpT <= 0) {
-        const away = target > 20 ? -1 : target < -20 ? 1 : pick([-1, 1]);
-        target = clamp(target + away * rand(28, 40), -60, 60);
-        jumpT = gap();
-        weakT = 0;
-        meter.classList.remove("fuzz");
-      }
-      if (alertT > 0 && (alertT -= dt) <= 0) alert.classList.remove("on");
+      // The sweet spot sweeps left and right on its own: follow it.
+      phase += omega * dt;
+      target = clamp(centre + amp * Math.sin(phase), -60, 60);
 
       const s = signal(), strong = s >= 0.72, weak = s < 0.35;
       if (strong) found = true;
@@ -390,20 +363,20 @@ function wifiGame(api: Api, o: MiniOpts): Game {
         drawnAngle = angle;
         ants.forEach((g, i) => g.setAttribute("transform", `translate(${PIVOTS[i]} 198) rotate(${angle.toFixed(2)})`));
       }
-      for (let i = 0; i < 5; i++) setBar(i, fuzz ? Math.random() : clamp(s * 5 - i, 0, 1));
-      const zone = fuzz || weak ? "" : strong ? "strong" : "mid";
+      for (let i = 0; i < 5; i++) setBar(i, clamp(s * 5 - i, 0, 1));
+      const zone = weak ? "" : strong ? "strong" : "mid";
       if (zone !== drawnZone) {
         if (drawnZone) meter.classList.remove(drawnZone);
         if (zone) meter.classList.add(zone);
         drawnZone = zone;
       }
-      const text = fuzz ? "STATIC!" : strong ? "STRONG" : !weak ? "FAIR" : s > 0.04 ? "WEAK" : "NO SIGNAL";
+      const text = strong ? "STRONG" : !weak ? "FAIR" : s > 0.04 ? "WEAK" : "NO SIGNAL";
       if (text !== drawnText) { drawnText = text; label.textContent = text; }
       const wave = Math.round(clamp((s - 0.5) / 0.3, 0, 1) * 20) / 20;
       if (wave !== drawnWave) { drawnWave = wave; waves.forEach((w) => w.setAttribute("opacity", String(wave))); }
       const ledCol = strong ? "#e9c25a" : Math.floor(performance.now() / 300) % 2 ? "#d0392e" : "#5a2620";
       if (ledCol !== drawnLed) { drawnLed = ledCol; led.setAttribute("fill", ledCol); }
-      const hint = alertT > 0 ? "" : !found ? "Find the signal!" : weak ? "Signal lost! Re-aim!" : "";
+      const hint = !found ? "Find the signal!" : weak ? "It drifted! Follow it!" : "";
       if (hint !== drawnHint) { drawnHint = hint; api.hint(hint); }
       if (v >= need) finish();
     },
@@ -1457,7 +1430,12 @@ function emailGame(api: Api, o: MiniOpts): Game {
   };
 }
 
-const THEMES: Record<string, { accent: string; instr: string; make: (api: Api, o: MiniOpts) => Game; light?: boolean }> = {
+/**
+ * `ready`: seconds of GET READY before the game starts, to read the instructions. The game doesn't update and the
+ * stage can't be clicked meanwhile; keys still reach it (so a key held down is ready to go), so only use it for games
+ * whose key() just records what's held.
+ */
+const THEMES: Record<string, { accent: string; instr: string; make: (api: Api, o: MiniOpts) => Game; light?: boolean; ready?: number }> = {
   plant: { accent: "#4b9a63", instr: "The plant won't sit still. Keep the watering can over it!", make: plantGame },
   print: { light: true, accent: "#6aa3b4", instr: "Press <b>SPACE</b> when the page lines up with the yellow outline.", make: printGame },
   shred: { accent: "#5b6380", instr: "Drag the paper down into the shredder. Not too fast, not too slow!", make: shredGame },
@@ -1467,7 +1445,7 @@ const THEMES: Record<string, { accent: string; instr: string; make: (api: Api, o
   server: { accent: "#3f8f86", instr: "Drag each cable to the port of the same colour.", make: serverGame },
   emails: { light: true, accent: "#d8a93b", instr: "Type the reply. Every key counts!", make: emailGame },
   jam: { light: true, accent: "#8f97a3", instr: "Wiggle the page out: alternate <b>A</b> and <b>D</b> (or the arrows). Same side twice rips it!", make: jamGame },
-  wifi: { accent: "#3f8f86", instr: "Drag sideways or hold <b>A</b>/<b>D</b> to aim the antennas. Keep the bars green!", make: wifiGame },
+  wifi: { accent: "#3f8f86", instr: "Drag sideways or hold <b>A</b>/<b>D</b> to aim the antennas. The signal drifts left and right: follow it and keep the bars green!", make: wifiGame, ready: 1 },
   mail: { light: true, accent: "#2f4f8f", instr: "Send each envelope to its department: click a cubby or press <b>1</b>-<b>4</b>.", make: mailGame },
   board: { light: true, accent: "#4b9a63", instr: "Hold the mouse and scrub the board clean. Don't touch the CEO's note!", make: boardGame },
   keypad: { accent: "#5b6380", instr: "Punch in the 4-digit code. Clues are hidden in today's chores.", make: keypadGame }
@@ -1548,6 +1526,16 @@ export function openMini(host: HTMLElement, o: MiniOpts): MiniHandle {
     }
   };
   const game = th.make(api, o);
+  // A moment to take in the instructions before the clock on the chore starts.
+  const readyTotal = th.ready ?? 0;
+  let readyT = readyTotal;
+  let readyEl: HTMLElement | null = null, readyBar: HTMLElement | null = null;
+  if (readyT > 0) {
+    readyEl = el("div", "m-ready", stage, "<span>GET READY</span><i><b></b></i>");
+    readyBar = q(readyEl, "b");
+    readyEl.addEventListener("pointerdown", (e) => { e.stopPropagation(); e.preventDefault(); });
+    gsap.fromTo(q(readyEl, "span"), { scale: 1.6, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.25, ease: "back.out(2)" });
+  }
   if (o.note) {
     const n = el("div", "m-note", wrap, `<b>psst...</b>${o.note}`);
     gsap.fromTo(n, { scale: 0, rotation: 30, opacity: 0 }, { scale: 1, rotation: 6, opacity: 1, duration: 0.45, delay: 0.7, ease: "back.out(2.4)", onStart: () => { if (!closed) o.sfx("note"); } });
@@ -1575,7 +1563,18 @@ export function openMini(host: HTMLElement, o: MiniOpts): MiniHandle {
     if (closed) return;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    if (!won) game.update?.(dt);
+    if (!won) {
+      if (readyT > 0) {
+        readyT -= dt;
+        if (readyBar) readyBar.style.transform = `scaleX(${clamp(readyT / readyTotal, 0, 1).toFixed(3)})`;
+        if (readyT <= 0) {
+          readyEl?.remove();
+          readyEl = readyBar = null;
+          api.pop(W / 2, H / 2, "GO!", "#6fe08a");
+          o.sfx("tick");
+        }
+      } else game.update?.(dt);
+    }
     raf = requestAnimationFrame(loop);
   };
   raf = requestAnimationFrame(loop);

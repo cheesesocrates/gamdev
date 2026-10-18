@@ -762,6 +762,103 @@ try {
     console.log("overnight repairs", JSON.stringify(night));
   }
 
+  // THE HEAD OF HR: the shield blocks from the front but not from behind, the bash into a wall stuns him, the
+  // megaphone cone, Mandatory Training, Zero Tolerance; and the boss plan avoids the bosses you met last.
+  if (scenario === "hrboss") {
+    await ev(() => { window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    const T = 64;
+    await ev((T) => {
+      const h = window.__HT, s = h.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      h.god(true);
+      const p = s.world.nearestWalkable(30 * T, 37 * T);
+      s.player.x = p.x; s.player.y = p.y;
+      const c = s.world.nearestWalkable(p.x + 300, p.y);
+      const b = s.spawnEnemy("hrhead", c.x, c.y, "hostile");
+      s.waves.boss = b;
+      b.spawnGrace = 0;
+      b.bashCd = b.pulseCd = b.bossSummonCd = b.pivotCd = 99;
+      window.__hrb = b;
+    }, T);
+    const st = () => ev(() => { const s = window.__HT.scene, b = window.__hrb, p = s.player; const want = Math.atan2(p.y - b.y, p.x - b.x); let df = Math.abs(((b.facing - want) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI); return { hp: Math.round(b.hp), max: Math.round(b.maxHp), facingOff: +df.toFixed(2), stun: +b.stun.toFixed(2), wind: +b.chargeWind.toFixed(2), charging: +b.charging.toFixed(2), x: Math.round(b.x), y: Math.round(b.y) }; });
+    // Pinned in the North Hall facing east (down the corridor): shoot him from the front, then from behind.
+    await ev((T) => {
+      const s = window.__HT.scene, b = window.__hrb;
+      const c = s.world.nearestWalkable(30 * T, 13.3 * T); b.x = c.x; b.y = c.y; b.vx = b.vy = 0;
+      b.spawnGrace = 99; b.facing = 0;
+      const p = s.world.nearestWalkable(35 * T, 13.3 * T); s.player.x = p.x; s.player.y = p.y;
+      window.__hall = { bx: c.x, by: c.y, px: p.x, py: p.y };
+    }, T);
+    await sleep(300);
+    const shoot = (fromBehind) => ev((fb) => {
+      const s = window.__HT.scene, b = window.__hrb;
+      const hp0 = b.hp;
+      b.vx = b.vy = 0;
+      for (let k = 0; k < 5; k++) {
+        const a = fb ? b.facing + Math.PI : b.facing;
+        const x = b.x + Math.cos(a) * 130, y = b.y + Math.sin(a) * 130;
+        s.projectiles.firePlayer("staple", x, y, Math.atan2(b.y - y, b.x - x));
+      }
+      return hp0;
+    }, fromBehind);
+    let hp0 = await shoot(false);
+    await sleep(1200);
+    console.log("front: hp", Math.round(hp0), "->", (await st()).hp, JSON.stringify(await st()));
+    hp0 = await shoot(true);
+    await sleep(1200);
+    console.log("behind: hp", Math.round(hp0), "->", (await st()).hp);
+    await shot("hr01-shield");
+    // The megaphone: a cone of five blasts.
+    const waves = () => ev(() => window.__HT.scene.projectiles.list.filter((p) => p.active && !p.friendly && p.kind === "wave").length);
+    // (The player a few steps away in the same room, so the blasts are still in the air when they're counted.)
+    await ev(() => { const s = window.__HT.scene, b = window.__hrb, h = window.__hall; b.x = h.bx; b.y = h.by; s.player.x = h.px; s.player.y = h.py; b.facing = 0; b.spawnGrace = 0; b.losTimer = 0; b.pulseCd = 0; });
+    let most = 0;
+    for (let i = 0; i < 15; i++) { most = Math.max(most, await waves()); await sleep(80); }
+    console.log("megaphone blasts:", most, JSON.stringify(await ev(() => { const s = window.__HT.scene, b = window.__hrb, p = s.player; return { d: Math.round(Math.hypot(p.x - b.x, p.y - b.y)), los: b.hasLos, pulseCd: +b.pulseCd.toFixed(2), stun: b.stun, grace: b.spawnGrace, slip: b.slip, mode: b.mode, lurking: b.lurking }; })));
+    // Disciplinary Action: in the corridor, his shield pointing at the north wall while you're down the hall. He
+    // turns slowly, so the bash goes into the wall: THUD, stunned.
+    await ev(() => {
+      const s = window.__HT.scene, b = window.__hrb, h = window.__hall;
+      b.pulseCd = 99;
+      b.x = h.bx; b.y = h.by; b.vx = b.vy = 0; s.player.x = h.px; s.player.y = h.py;
+      b.facing = -Math.PI / 2; b.losTimer = 0;
+      b.bashCd = 0; b.stun = 0;
+    });
+    let thud = null, wound = false, lunged = false;
+    for (let i = 0; i < 60; i++) {
+      const r = await st();
+      if (r.wind > 0) wound = true;
+      if (r.charging > 0) lunged = true;
+      if (lunged && r.charging <= 0) { thud = r; break; }
+      await sleep(60);
+    }
+    console.log("bash: wound up", wound, "lunged", lunged, "after", JSON.stringify(thud));
+    await shot("hr02-thud");
+    // Mandatory Training and Zero Tolerance.
+    await ev(() => { const b = window.__hrb; b.stun = 0; b.bashCd = 99; b.bossSummonCd = 0; });
+    let staff = 0;
+    for (let i = 0; i < 20 && !staff; i++) { staff = await ev(() => window.__HT.scene.enemies.filter((e) => !e.dead && e.summoner === window.__hrb).map((e) => e.type).join(",")); await sleep(100); }
+    console.log("mandatory training:", staff);
+    await ev(() => { const b = window.__hrb; b.hp = b.maxHp * 0.4; b.pivotCd = 0; b.bossSummonCd = 99; });
+    most = 0;
+    for (let i = 0; i < 20; i++) { most = Math.max(most, await waves()); await sleep(80); }
+    console.log("zero tolerance blasts:", most);
+    await shot("hr03-zero-tolerance");
+    // The boss plan: with the Consultant and the Cold Caller met last, day 3 is the Hatchet Man or the Head of HR.
+    const plan = await ev(() => {
+      const h = window.__HT, st = h.state;
+      st.noteBoss("consultant"); st.noteBoss("caller");
+      const first = {}, second = {};
+      for (let k = 0; k < 400; k++) { st.reset(); const a = st.bossFor(3), b = st.bossFor(6); first[a] = (first[a] ?? 0) + 1; second[b] = (second[b] ?? 0) + 1; if (a === b) return "SAME BOSS TWICE"; }
+      return { first, second };
+    });
+    console.log("boss plan after meeting consultant + caller:", JSON.stringify(plan));
+  }
+
   if (scenario === "stress") {
     await ev(() => {
       const h = window.__HT;
@@ -965,38 +1062,47 @@ try {
       } else if (c === "jam") {
         for (const k of ["KeyA", "KeyD", "KeyA", "KeyD", "KeyA", "KeyD", "KeyD"]) { await page.keyboard.press(k); await sleep(90); }
       } else if (c === "wifi") {
-        // Swing the antennas with a mouse drag, then hunt for the signal with held keys (sweeping, turning back at
-        // the stops) and let go whenever it's strong, until the connection is about half done.
+        // GET READY first (the stage can't be dragged meanwhile). Then swing the antennas with a mouse drag, and
+        // follow the signal as it sweeps with held keys: keep going while the bars rise, turn round when they drop.
         const wifi = async () => ({ prog: await prog(), ...(await ev(() => ({
           text: document.querySelector(".wf-state")?.textContent,
+          ready: !!document.querySelector(".m-ready"),
+          alert: !!document.querySelector(".wf-alert"),
+          sig: [...document.querySelectorAll(".wf-bars b")].reduce((a, b) => a + (Number(/scaleY\(([\d.]+)\)/.exec(b.style.transform)?.[1]) || 0), 0) / 5,
           angle: Number(/rotate\(([-\d.]+)\)/.exec(document.querySelector(".wf-ant")?.getAttribute("transform") ?? "")?.[1] ?? 0)
         }))) });
         const r = await rect(".mini-stage");
+        const atStart = await wifi();
+        await shot("m-wifi-ready");
+        if (r) {
+          const y = r.y + r.h * 0.5;
+          await drag(r.x + r.w * 0.6, y, r.x + r.w * 0.4, y, r.w * 0.3);
+        }
+        console.log("  wifi at the start", JSON.stringify(atStart), "| a drag during GET READY moved it to", (await wifi()).angle);
+        await page.waitForFunction(() => !document.querySelector(".m-ready"), { timeout: 15000 });
         if (r) {
           const y = r.y + r.h * 0.5;
           await drag(r.x + r.w * 0.6, y, r.x + r.w * 0.4, y, r.w * 0.3);
           console.log("  wifi after drag", JSON.stringify(await wifi()));
         }
-        let dir = 1, held = null;
+        let dir = 1, held = null, last = -1, strongT = 0, losses = 0;
         const hold = async (key) => {
           if (held === key) return;
           if (held) await page.keyboard.up(held);
           held = key;
           if (key) await page.keyboard.down(key);
         };
-        for (const t0 = Date.now(); Date.now() - t0 < 7000; ) {
+        for (const t0 = Date.now(); Date.now() - t0 < 14000; ) {
           const w = await wifi();
-          if (w.prog >= 45) break;
-          if (w.text === "STRONG") await hold(null);
-          else {
-            if (w.angle >= 74) dir = -1;
-            else if (w.angle <= -74) dir = 1;
-            await hold(dir > 0 ? "KeyD" : "KeyA");
-          }
-          await sleep(40);
+          if (w.prog >= 99) break;
+          if (w.text === "STRONG") strongT++;
+          if (w.sig < last - 0.01 || w.angle >= 74 || w.angle <= -74) dir = w.angle >= 74 ? -1 : w.angle <= -74 ? 1 : -dir;
+          last = w.sig;
+          await hold(dir > 0 ? "KeyD" : "KeyA");
+          await sleep(60);
         }
         await hold(null);
-        console.log("  wifi", JSON.stringify(await wifi()));
+        console.log("  wifi", JSON.stringify(await wifi()), "strong readings:", strongT);
       } else if (c === "mail") {
         for (const k of ["Digit1", "Digit2", "Digit3"]) { await page.keyboard.press(k); await sleep(420); }
       } else if (c === "board") {

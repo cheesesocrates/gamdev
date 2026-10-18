@@ -1,8 +1,8 @@
-export type EnemyType = "intern" | "fulltime" | "accountant" | "manager" | "hr" | "burnout" | "robot" | "consultant" | "hatchet" | "caller" | "ceo";
-export type BossKind = "consultant" | "hatchet" | "caller" | "ceo";
+export type EnemyType = "intern" | "fulltime" | "accountant" | "manager" | "hr" | "burnout" | "robot" | "consultant" | "hatchet" | "caller" | "hrhead" | "ceo";
+export type BossKind = "consultant" | "hatchet" | "caller" | "hr" | "ceo";
 
 /** The bosses a run draws its day-3 and day-6 visitors from (the CEO always closes a run on day 9). */
-export const BOSS_POOL: EnemyType[] = ["hatchet", "caller", "consultant"];
+export const BOSS_POOL: EnemyType[] = ["hatchet", "caller", "consultant", "hrhead"];
 
 export interface RangedDef {
   kind: "calc" | "memo" | "bolt" | "phone";
@@ -60,6 +60,11 @@ export const BOSS_INFO: Record<BossKind, { sub: string; pa: string; memo: string
     pa: "Attention all staff. An external consultant has arrived to optimize headcount. His interns protect him.",
     memo: "a consultant is optimizing headcount"
   },
+  hr: {
+    sub: "would like a quick word in private",
+    pa: "Attention all staff. The Head of HR is on the floor. His shield blocks shots from the front: get round the side.",
+    memo: "the Head of HR is handling complaints personally"
+  },
   ceo: {
     sub: "wants a word about your performance",
     pa: "This is your CEO speaking. I will be handling this one personally.",
@@ -116,6 +121,13 @@ export const ENEMIES: Record<EnemyType, EnemyDef> = {
     type: "caller", title: "THE COLD CALLER", hp: 1350, speed: 104, radius: 28,
     sprites: ["manBlue_hold"], scale: 2.0, melee: 2, boss: true, bossKind: "caller", smart: true, tint: 0xd2e2ff, held: "i_phone", heldScale: 0.6,
     ranged: { kind: "phone", dmg: 2, speed: 0, cooldown: 2.3, range: 820, count: 1, spread: 0, keepDist: [300, 500] }
+  },
+  // A day-3 or day-6 boss: a riot shield the size of a door (he turns slowly: flank him), a megaphone that stuns,
+  // Mandatory Training (calls in staff), shield-bash lunges (into a wall: stunned, guard down) and, below half
+  // health, a ring of megaphone blasts.
+  hrhead: {
+    type: "hrhead", title: "THE HEAD OF HR", hp: 1600, speed: 96, radius: 30,
+    sprites: ["soldier1_hold"], scale: 2.1, melee: 2, boss: true, bossKind: "hr", shield: true, megaphone: true, smart: true, tint: 0xd8ecd0
   },
   // Day 9 (and every 9th day in endless): three phases, and the other bosses' moves on top of his own. Quarterly Review
   // (coin fans, golden-parachute leaps, the Hostile Takeover charge through any interior wall), Restructuring (security

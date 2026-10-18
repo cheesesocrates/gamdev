@@ -149,6 +149,24 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - World: holes smashed in the concrete are repaired overnight like drywall and glass, and a PA speaker on a wall that
   gets knocked down falls off (sparks) until the overnight repairs.
 - Audio: the fight music is a little quieter (about 17% lower).
+- Chores: **Reset the Wi-Fi** has no interference any more (no static, no "Someone microwaved fish!", no jumps). The
+  sweet spot sweeps smoothly left and right by itself: find it by the bars, then keep the antennas on it until it
+  connects. Later days make the sweep a little quicker (no quicker after day 3) and the connection longer. Losing the
+  signal for too long once it's connecting still costs a second.
+- Chores: the Wi-Fi chore starts with a one-second **GET READY** (the instructions are up, a bar runs down, then
+  "GO!"). The signal doesn't move and the antennas can't be dragged until then; a key you're already holding works
+  the moment it starts. (Mini-games can opt in to this with `ready` in their theme.)
+- Gameplay: new boss, **the Head of HR**, joins the day-3 / day-6 pool (four bosses now). He carries a riot shield
+  the size of a door that blocks shots from the front, and he turns slowly, so get round the side, bounce shots off a
+  wall, bonk the shield aside with the keyboard, or use fire, traps and explosions (bosses don't slip). His megaphone
+  fires a cone of five stunning blasts the way he's facing. **Mandatory Training** calls in an HR Director and
+  interns. **Disciplinary Action** is a short shield-bash lunge the way the shield points (a short red lane first); it
+  shoves furniture but walls and glass don't give, so if he bashes into one it's THUD: stunned for 1.4 s with his
+  guard down. Below half health, **Zero Tolerance**: a full ring of twelve megaphone blasts. His own memo line, PA
+  announcement and tips.
+- Gameplay: **boss variety between runs.** A run's day-3 boss is never one of the last two pool bosses you met
+  (remembered across runs in the browser), and day 6 is any of the other three. Before, the day-3 boss was a plain
+  random pick, so the same one could open several runs in a row.
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.
