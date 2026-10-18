@@ -9,6 +9,48 @@ import { GameState } from "../systems/GameState";
 /** The water layer is painted at half resolution: 4x fewer pixels, and the soft edges look nicer anyway. */
 const WS = 0.5;
 
+/** One blaze's pooled images: a warm light on the floor, fire puffs, a white-hot heart, licking flame tongues, smoke. */
+interface Blaze {
+  glow: Phaser.GameObjects.Image;
+  puffs: Phaser.GameObjects.Image[];
+  core: Phaser.GameObjects.Image;
+  tongues: Phaser.GameObjects.Image[];
+  smoke: Phaser.GameObjects.Image[];
+  /** How much smoke shows (eased): only the far side of a fire, where nothing burns beyond it, smokes. */
+  fume: number;
+  /** How bright its light on the floor is (eased): in the middle of a big fire the blazes round it light the floor. */
+  light: number;
+  /** Index into BLAZE. */
+  kind: number;
+  /** Randomises every loop of this blaze, so neighbouring fires never pulse in sync. */
+  seed: number;
+  born: number;
+  stamp: number;
+}
+type FlamePart = "glow" | "puff" | "core" | "tongue" | "smoke";
+
+/**
+ * Blaze looks: a burning paper pile, a bare-floor flicker, a burning coworker. Distances are world px at size 1,
+ * the rest are texture scales and alphas; `life` is a puff's loop in seconds, `fade` how long the dying fire shrinks.
+ */
+const BLAZE = [
+  { puffs: 3, tongues: 2, smoke: 1, life: 0.8, spread: 40, rise: 58, puff: 0.68, puffA: 1, core: 0.76, coreA: 0.58, tongue: 0.66, glow: 4.2, glowA: 0.55, smokeS: 1.15, smokeA: 0.55, fade: 1.4 },
+  { puffs: 2, tongues: 1, smoke: 0, life: 0.6, spread: 26, rise: 36, puff: 0.48, puffA: 1, core: 0.48, coreA: 0.5, tongue: 0.46, glow: 2.6, glowA: 0.45, smokeS: 0, smokeA: 0, fade: 0.8 },
+  { puffs: 3, tongues: 3, smoke: 0, life: 0.5, spread: 22, rise: 44, puff: 0.52, puffA: 0.9, core: 0.56, coreA: 0.55, tongue: 0.6, glow: 2.2, glowA: 0.45, smokeS: 0, smokeA: 0, fade: 0 }
+];
+/**
+ * The fight's lighting multiplies the world by a cool grey, so a colour whose green clips turns lime (and white turns
+ * lavender). Every layer keeps green well under red, so even stacked they top out at a hot yellow.
+ */
+const PUFF_HOT = 0xffd8ac, PUFF_MID = 0xff9658, PUFF_END = 0xc0442a;
+const SMOKE_LIT = 0xffb080, SMOKE_GREY = 0xb8b0a8;
+
+/** Linear blend of two 0xRRGGBB colours. */
+function mixColor(a: number, b: number, t: number) {
+  const ar = a >> 16, ag = (a >> 8) & 255, ab = a & 255;
+  return ((ar + ((b >> 16) - ar) * t) << 16) | ((ag + (((b >> 8) & 255) - ag) * t) << 8) | (ab + ((b & 255) - ab) * t);
+}
+
 /**
  * Tile-based environmental hazards shared by both phases: water puddles
  * (slippery; electrified when touching an overloaded power strip), shredded
@@ -33,11 +75,12 @@ export class Hazards {
   private centres = new Map<number, { x: number; y: number; r: number }>();
   /** Tiles already stamped into the water layer, with the electric state they were painted in. */
   private painted = new Map<number, number>();
-  /** Animated flames for burning tiles that are on screen (pooled). */
-  private flames = new Map<number, { imgs: Phaser.GameObjects.Image[]; ox: number[]; oy: number[]; base: number[]; glow: Phaser.GameObjects.Image; seed: number; stamp: number }>();
-  private flamePool: Phaser.GameObjects.Image[] = [];
-  private glowPool: Phaser.GameObjects.Image[] = [];
+  /** Animated blazes for burning tiles that are on screen, and for burning coworkers (by id). */
+  private flames = new Map<number, Blaze>();
+  private bodies = new Map<number, Blaze>();
+  private flamePools: Record<FlamePart, Phaser.GameObjects.Image[]> = { glow: [], puff: [], core: [], tongue: [], smoke: [] };
   private flameStamp = 0;
+  private bodyStamp = 0;
   private hasElectric = false;
   private waterDirty = false;
   private waterCd = 0;
@@ -365,12 +408,17 @@ export class Hazards {
       this.fire[i] -= dt;
       const x = (i % this.w + 0.5) * TILE, y = (Math.floor(i / this.w) + 0.5) * TILE;
       const onScreen = x > vx0 && x < vx1 && y > vy0 && y < vy1;
-      if (onScreen) this.animateFlames(i, x, y);
+      if (onScreen) this.animateFlames(i, x, y, dt);
       if (doEmit && onScreen) {
-        if (chance(0.35)) this.fx.burst("fire", x + rand(-22, 22), y + rand(-18, 18), 1);
+        const big = this.paper[i] === 1;
+        if (chance(big ? 0.14 : 0.06)) this.fx.burst("fire", x + rand(-20, 20), y + rand(-26, 4), 1);
+        // Burning paper glows, then chars black as the fire eats it.
         const sheets = this.paperImg.get(i);
-        if (sheets) for (const sh of sheets) sh.setTint(0xff8a3a);
-        if (chance(0.45)) this.fx.burst("ember", x + rand(-20, 20), y + rand(-20, 20), 1);
+        if (sheets) {
+          const tint = mixColor(0x2a211c, 0xb85c2c, Math.min(1, this.fire[i] / 2.5));
+          for (const sh of sheets) sh.setTint(tint);
+        }
+        if (chance(big ? 0.5 : 0.25)) this.fx.burst("ember", x + rand(-20, 20), y + rand(-28, 8), 1);
       }
       if (doSpread && this.paper[i]) {
         const tx = i % this.w, ty = Math.floor(i / this.w);
@@ -394,13 +442,18 @@ export class Hazards {
     }
     this.burningCount = burning;
     // Flames on tiles that went out (or scrolled off screen) go back to the pool.
-    for (const [i, fl] of this.flames) {
-      if (fl.stamp === this.flameStamp) continue;
-      for (const im of fl.imgs) { im.setVisible(false); this.flamePool.push(im); }
-      fl.glow.setVisible(false);
-      this.glowPool.push(fl.glow);
+    for (const [i, b] of this.flames) {
+      if (b.stamp === this.flameStamp) continue;
+      this.releaseBlaze(b);
       this.flames.delete(i);
     }
+    // Coworkers update before the hazards: a blaze nobody drew this frame (put out, or gone) is released.
+    for (const [id, b] of this.bodies) {
+      if (b.stamp === this.bodyStamp) continue;
+      this.releaseBlaze(b);
+      this.bodies.delete(id);
+    }
+    this.bodyStamp++;
 
     // Crackle on live water.
     this.zapTimer -= dt;
@@ -418,48 +471,177 @@ export class Hazards {
     }
   }
 
-  /** Two or three flickering flames and a warm glow per burning tile; they shrink as the fire dies. */
-  private animateFlames(i: number, x: number, y: number) {
-    let fl = this.flames.get(i);
-    if (!fl) {
-      const big = this.paper[i] === 1;
-      const n = big ? 3 : 1;
-      const imgs: Phaser.GameObjects.Image[] = [], ox: number[] = [], oy: number[] = [], base: number[] = [];
-      for (let k = 0; k < n; k++) {
-        const im = this.flamePool.pop() ?? this.scene.add.image(0, 0, "flame", 0).setOrigin(0.5, 0.92);
-        im.setVisible(true);
-        imgs.push(im);
-        ox.push(rand(-20, 20));
-        oy.push(rand(-14, 18));
-        base.push(big ? rand(0.85, 1.2) : rand(0.5, 0.7));
-      }
-      const glow = this.glowPool.pop() ?? this.scene.add.image(0, 0, "fx_light_01").setBlendMode(Phaser.BlendModes.ADD).setTint(0xff7a2a).setDepth(DEPTH.HAZARD + 2);
-      glow.setVisible(true);
-      fl = { imgs, ox, oy, base, glow, seed: Math.random() * 10, stamp: 0 };
-      this.flames.set(i, fl);
-      for (const im of imgs) this.scene.tweens.add({ targets: im, scaleY: { from: 0.1, to: im.scaleY || 1 }, duration: 180, ease: "Back.easeOut" });
+  /** A pooled flame image, visible and ready to draw. */
+  private takeFlame(part: FlamePart) {
+    const im = this.flamePools[part].pop();
+    if (im) return im.setVisible(true);
+    const s = this.scene, ADD = Phaser.BlendModes.ADD;
+    if (part === "glow") return s.add.image(0, 0, "soft").setBlendMode(ADD).setTint(0xff5a18).setDepth(DEPTH.HAZARD + 2);
+    if (part === "puff") return s.add.image(0, 0, "fire_puff", 0);
+    if (part === "core") return s.add.image(0, 0, "fire_core", 0).setBlendMode(ADD).setTint(0xff7428);
+    if (part === "smoke") return s.add.image(0, 0, "fire_smoke", 0);
+    return s.add.image(0, 0, "fire_tongue", 0).setOrigin(0.5, 0.96).setBlendMode(ADD);
+  }
+
+  private newBlaze(kind: number): Blaze {
+    const P = BLAZE[kind];
+    const puffs: Phaser.GameObjects.Image[] = [], tongues: Phaser.GameObjects.Image[] = [], smoke: Phaser.GameObjects.Image[] = [];
+    for (let k = 0; k < P.puffs; k++) puffs.push(this.takeFlame("puff"));
+    for (let k = 0; k < P.tongues; k++) tongues.push(this.takeFlame("tongue"));
+    for (let k = 0; k < P.smoke; k++) smoke.push(this.takeFlame("smoke"));
+    return { glow: this.takeFlame("glow"), puffs, core: this.takeFlame("core"), tongues, smoke, fume: 0, light: 1, kind, seed: Math.random() * 1000, born: this.scene.time.now, stamp: 0 };
+  }
+
+  private releaseBlaze(b: Blaze) {
+    const pools = this.flamePools;
+    b.glow.setVisible(false);
+    pools.glow.push(b.glow);
+    b.core.setVisible(false);
+    pools.core.push(b.core);
+    for (const im of b.puffs) { im.setVisible(false); pools.puff.push(im); }
+    for (const im of b.tongues) { im.setVisible(false); pools.tongue.push(im); }
+    for (const im of b.smoke) { im.setVisible(false); pools.smoke.push(im); }
+  }
+
+  private showBlaze(b: Blaze, v: boolean) {
+    b.glow.setVisible(v);
+    b.core.setVisible(v);
+    for (const im of b.puffs) im.setVisible(v);
+    for (const im of b.tongues) im.setVisible(v);
+    for (const im of b.smoke) im.setVisible(v);
+  }
+
+  /** Fire is y-sorted with the people around it (the glow stays on the floor); the flames burn in front of their smoke. */
+  private depthBlaze(b: Blaze, depth: number) {
+    for (const im of b.smoke) im.setDepth(depth - 0.3);
+    for (const im of b.puffs) im.setDepth(depth);
+    b.core.setDepth(depth + 0.5);
+    for (const im of b.tongues) im.setDepth(depth + 0.6);
+  }
+
+  /** Each burning tile on screen gets a looping blaze; it flares up when lit and shrinks and dims as the fire dies. */
+  private animateFlames(i: number, x: number, y: number, dt: number) {
+    const now = this.scene.time.now;
+    const kind = this.paper[i] === 1 ? 0 : 1;
+    let b = this.flames.get(i);
+    if (b && b.kind !== kind) { this.releaseBlaze(b); b = undefined; }
+    if (!b) {
+      b = this.newBlaze(kind);
+      this.depthBlaze(b, y + 8);
+      this.flames.set(i, b);
     }
-    fl.stamp = this.flameStamp;
-    const t = this.scene.time.now / 1000;
-    const fade = Math.min(1, this.fire[i] / 0.7);
-    fl.imgs.forEach((im, k) => {
-      const s = fl!.base[k] * (0.35 + 0.65 * fade) * (0.9 + 0.12 * Math.sin(t * 9 + fl!.seed * 13 + k * 2));
-      im.setFrame(Math.floor(t * 12 + fl!.seed * 7 + k * 2) % 6)
-        .setPosition(x + fl!.ox[k] + Math.sin(t * 5 + k) * 1.5, y + fl!.oy[k])
-        .setScale(s, s * (1 + 0.1 * Math.sin(t * 13 + k + fl!.seed)))
-        .setDepth(y + fl!.oy[k] + 8)
-        .setAlpha(0.35 + 0.65 * fade);
-    });
-    fl.glow.setPosition(x, y).setScale(1.15 + 0.15 * Math.sin(t * 7 + fl.seed)).setAlpha((0.3 + 0.14 * Math.sin(t * 11 + fl.seed * 3)) * fade);
+    b.stamp = this.flameStamp;
+    const fade = Math.min(1, this.fire[i] / BLAZE[kind].fade);
+    const grow = Math.min(1, (now - b.born) / 260);
+    // Stacked up, every tile's light would wash a big fire out: the more of its neighbours burn, the less it adds.
+    const W = this.w, F = this.fire, tx = i % W, ease = Math.min(1, dt * 3);
+    const n = (tx > 0 && F[i - 1] > 0 ? 1 : 0) + (tx < W - 1 && F[i + 1] > 0 ? 1 : 0) + (i >= W && F[i - W] > 0 ? 1 : 0) + (i + W < F.length && F[i + W] > 0 ? 1 : 0);
+    b.light += (1 - 0.17 * n - b.light) * ease;
+    if (b.smoke.length) b.fume += ((i < W || F[i - W] <= 0 ? 1 : 0) - b.fume) * ease;
+    this.drawBlaze(b, x, y, (0.35 + 0.65 * fade) * (0.3 + 0.7 * grow), 0.3 + 0.7 * fade, now / 1000);
+  }
+
+  /**
+   * A burning coworker's blaze, drawn every frame they burn (alpha 0 hides it while they're out of sight).
+   * Coworkers update before the hazards, which release any blaze that wasn't drawn this frame.
+   */
+  bodyFire(id: number, x: number, y: number, depth: number, scale: number, alpha: number) {
+    let b = this.bodies.get(id);
+    if (!b) {
+      b = this.newBlaze(2);
+      this.bodies.set(id, b);
+    }
+    b.stamp = this.bodyStamp;
+    const show = alpha > 0.01;
+    if (b.glow.visible !== show) this.showBlaze(b, show);
+    if (!show) return;
+    const now = this.scene.time.now;
+    this.depthBlaze(b, depth);
+    this.drawBlaze(b, x, y, scale * (0.4 + 0.6 * Math.min(1, (now - b.born) / 200)), alpha, now / 1000);
+  }
+
+  /** Puts a coworker's blaze out right away (they're gone). */
+  bodyFireOut(id: number) {
+    const b = this.bodies.get(id);
+    if (!b) return;
+    this.releaseBlaze(b);
+    this.bodies.delete(id);
+  }
+
+  /**
+   * Every puff, tongue and smoke wisp loops on its own clock. Loop lengths and phases come from the blaze's seed and
+   * each loop's look from a hash of its cycle number, so nothing is stored (or allocated) per particle.
+   * Frame indices are cached in `state` (Phaser never touches it) so frames only change between loops.
+   */
+  private drawBlaze(b: Blaze, x: number, y: number, size: number, alpha: number, t: number) {
+    const P = BLAZE[b.kind], seed = b.seed;
+    // Fire puffs: born small and hot at the base, they rise, swell, spin a little, redden and burn out.
+    for (let k = 0; k < b.puffs.length; k++) {
+      const im = b.puffs[k], sk = seed + k * 17.31;
+      const u = t / (P.life * (0.85 + 0.4 * this.hash(sk))) + this.hash(sk + 1.7);
+      const c = Math.floor(u), p = u - c;
+      const r1 = this.hash(sk + c * 3.17), r2 = this.hash(sk + c * 5.31 + 2.1), r3 = this.hash(sk + c * 7.77 + 4.3), r4 = this.hash(sk + c * 1.93 + 6.6);
+      const e = p * (2 - p);
+      const f = Math.floor(r4 * 9);
+      if (im.state !== f) { im.state = f; im.setFrame(f); }
+      im.setFlipX(r4 > 0.5)
+        .setPosition(x + ((r1 - 0.5) * P.spread + Math.sin(p * 5 + r3 * 6.3) * 4) * size, y + ((r2 - 0.5) * P.spread * 0.4 - P.rise * e) * size)
+        .setScale(P.puff * size * (0.34 + 0.66 * e) * (0.82 + 0.36 * r3))
+        .setRotation(r2 * 6.28 + (r3 - 0.5) * 1.8 * p)
+        .setAlpha(alpha * P.puffA * (p < 0.12 ? p / 0.12 : p > 0.35 ? ((1 - p) / 0.65) ** 1.4 : 1))
+        .setTint(p < 0.45 ? mixColor(PUFF_HOT, PUFF_MID, p / 0.45) : mixColor(PUFF_MID, PUFF_END, (p - 0.45) / 0.55));
+    }
+    // The hot heart at the base: flickers through the flash frames.
+    const core = b.core;
+    const rc = this.hash(seed * 1.31 + Math.floor(t * 12 + seed) * 0.73);
+    const cf = Math.floor(rc * 9);
+    if (core.state !== cf) { core.state = cf; core.setFrame(cf); }
+    core.setPosition(x + (rc - 0.5) * 6 * size, y + (2 - 8 * rc) * size)
+      .setScale(P.core * size * (0.86 + 0.24 * rc))
+      .setRotation(t * 0.8 + seed)
+      .setAlpha(alpha * P.coreA * (0.75 + 0.25 * rc));
+    // Flame tongues lick up out of the blaze and fall back (the art burns from yellow at the root to red at the tip).
+    for (let k = 0; k < b.tongues.length; k++) {
+      const im = b.tongues[k], sk = seed + 91.7 + k * 23.9;
+      const u = t / (0.3 + 0.28 * this.hash(sk)) + this.hash(sk + 0.9);
+      const c = Math.floor(u), p = u - c;
+      const r1 = this.hash(sk + c * 2.71), r2 = this.hash(sk + c * 4.13 + 1.3);
+      const lick = Math.sin(p * Math.PI);
+      const tf = r2 < 0.5 ? 0 : 1;
+      if (im.state !== tf) { im.state = tf; im.setFrame(tf); }
+      im.setFlipX(r1 > 0.5)
+        .setPosition(x + (r1 - 0.5) * P.spread * 0.9 * size, y + (6 + (r2 - 0.5) * 12) * size)
+        .setScale(P.tongue * size * (0.7 + 0.3 * r2), P.tongue * size * (0.3 + 0.8 * lick))
+        .setRotation((r1 - 0.5) * 0.5 + Math.sin(t * 8 + k * 2 + seed) * 0.08)
+        .setAlpha(alpha * Math.min(1, lick * 1.8) * 0.66)
+        .setTint(r2 > 0.4 ? 0xff6022 : 0xff7028);
+    }
+    // Smoke rolls up off the top of a big blaze, lit orange from below, and drifts away grey.
+    for (let k = 0; k < b.smoke.length; k++) {
+      const im = b.smoke[k], sk = seed + 57.1 + k * 31.7;
+      const u = t / (2 * (0.85 + 0.35 * this.hash(sk))) + this.hash(sk + 2.3);
+      const c = Math.floor(u), p = u - c;
+      const r1 = this.hash(sk + c * 3.71), r2 = this.hash(sk + c * 6.13 + 1.9);
+      const e = p * (2 - p);
+      const f = Math.floor(r2 * 6);
+      if (im.state !== f) { im.state = f; im.setFrame(f); }
+      im.setPosition(x + ((r1 - 0.5) * P.spread + (r2 - 0.5) * 40 * e) * size, y - (24 + P.rise * 2 * e) * size)
+        .setScale(P.smokeS * size * (0.45 + 0.85 * e))
+        .setRotation(r1 * 6.28 + (r2 - 0.5) * 1.2 * p)
+        .setAlpha(alpha * b.fume * P.smokeA * (p < 0.2 ? p / 0.2 : (1 - p) / 0.8))
+        .setTint(mixColor(SMOKE_LIT, SMOKE_GREY, Math.min(1, p * 2.2)));
+    }
+    // Warm light thrown on the floor around it, flickering with the flames.
+    b.glow.setPosition(x, y - 6 * size)
+      .setScale(P.glow * size * (1 + 0.05 * Math.sin(t * 6.3 + seed)))
+      .setAlpha(alpha * b.light * P.glowA * (0.8 + 0.12 * Math.sin(t * 11.7 + seed * 3) + 0.08 * Math.sin(t * 23.1 + seed)));
   }
 
   clear() {
-    for (const [, fl] of this.flames) {
-      for (const im of fl.imgs) { im.setVisible(false); this.flamePool.push(im); }
-      fl.glow.setVisible(false);
-      this.glowPool.push(fl.glow);
-    }
+    for (const b of this.flames.values()) this.releaseBlaze(b);
     this.flames.clear();
+    for (const b of this.bodies.values()) this.releaseBlaze(b);
+    this.bodies.clear();
     for (const sheets of this.paperImg.values()) sheets.forEach((sh) => sh.destroy());
     this.waterTiles.clear();
     this.waterRT.clear();

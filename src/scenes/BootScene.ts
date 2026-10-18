@@ -61,6 +61,11 @@ export class BootScene extends Phaser.Scene {
     for (const i of ICONS) this.load.image(`icon_${i}`, `assets/icons/${i}.png`);
     for (const s of SFX_FILES) this.load.audio(`sfx_${s}`, `assets/audio/sfx/${s}.ogg`);
     for (const m of MUSIC_FILES) this.load.audio(`music_${m.key}`, `assets/audio/music/${m.file}`);
+    // Fire (Kenney Smoke Particles + Particle Pack): fire puffs, white-hot cores, flame tongues, black smoke.
+    this.load.spritesheet("fire_puff", "assets/particles/fire_puff.png", { frameWidth: 128, frameHeight: 128 });
+    this.load.spritesheet("fire_core", "assets/particles/fire_core.png", { frameWidth: 96, frameHeight: 96 });
+    this.load.spritesheet("fire_tongue", "assets/particles/fire_tongue.png", { frameWidth: 56, frameHeight: 132 });
+    this.load.spritesheet("fire_smoke", "assets/particles/fire_smoke.png", { frameWidth: 96, frameHeight: 96 });
   }
 
   create() {
@@ -681,38 +686,6 @@ function makeTextures(scene: Phaser.Scene) {
       ctx.fill();
     }
   });
-
-  // Cartoon flame: six frames of flicker, used on burning tiles and burning coworkers.
-  {
-    const FW = 48, FH = 64, N = 6;
-    canvasTexture(scene, "flame", FW * N, FH, (ctx) => {
-      for (let k = 0; k < N; k++) {
-        const ph = (k / N) * Math.PI * 2;
-        const cx = k * FW + FW / 2, base = FH - 3;
-        const lay = (w: number, h: number, sway: number, color: string) => {
-          const tipX = cx + Math.sin(ph) * sway, tipY = base - h;
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.moveTo(cx - w / 2, base - h * 0.3);
-          ctx.bezierCurveTo(cx - w / 2, base + 3, cx + w / 2, base + 3, cx + w / 2, base - h * 0.3);
-          ctx.bezierCurveTo(cx + w / 2, base - h * 0.62, tipX + w * 0.18, tipY + h * 0.3, tipX, tipY);
-          ctx.bezierCurveTo(tipX - w * 0.2, tipY + h * 0.34, cx - w / 2, base - h * 0.6, cx - w / 2, base - h * 0.3);
-          ctx.fill();
-        };
-        lay(42, 54 + Math.sin(ph * 2) * 5, 8, "#d8432a");
-        lay(32, 43 + Math.cos(ph * 2) * 4, 7, "#f0862a");
-        lay(20, 30 + Math.sin(ph * 3) * 3, 5, "#ffcf4a");
-        lay(10, 15 + Math.cos(ph) * 2, 2, "#fff2b0");
-        // a little detached lick of fire that flickers away
-        ctx.fillStyle = "#f0862a";
-        ctx.beginPath();
-        ctx.arc(cx + Math.cos(ph) * 9, base - 50 - Math.sin(ph) * 5, 3 + Math.sin(ph * 2), 0, Math.PI * 2);
-        ctx.fill();
-      }
-    });
-    const t = scene.textures.get("flame");
-    for (let k = 0; k < N; k++) t.add(k, 0, k * FW, 0, FW, FH);
-  }
 
   // Water layer stamps (tinted per pass when painting puddles).
   canvasTexture(scene, "w_disc", 64, 64, (ctx) => {

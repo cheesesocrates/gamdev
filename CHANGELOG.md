@@ -84,6 +84,11 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Fix (Gameplay): a boss day could end without the boss if the quota was met before he'd stepped out of the lift.
   The day now waits for the boss to turn up and be fired.
 - Fix (UI): every boss was announced as "THE CONSULTANT HAS BEEN LET GO" when fired; it now uses the boss's name.
+- World: **fire looks like fire.** The cartoon flames are gone. Burning tiles are real blazes built from Kenney's
+  Smoke Particles fire frames: turbulent fire puffs that rise, swell and redden, a white-hot core, flame tongues
+  licking up, embers, and smoke rolling off the top of a big fire (lit orange from below). Burning paper glows, then
+  chars black. Burning coworkers carry a small blaze of their own (and no longer strobe white on every burn tick), and
+  big explosions throw out a fireball. Everything is pooled, so a floor full of fire stays cheap.
 - Chores: **Reset the Wi-Fi** is no longer a memory game (the light sequences kept getting longer). Now you aim the
   router's antennas (drag sideways, or hold A / D) to find the signal and hold full bars until it connects. The sweet
   spot drifts, and every few seconds office interference ("Someone microwaved fish!") knocks it somewhere new, with a

@@ -1202,7 +1202,7 @@ export class GameScene extends Phaser.Scene {
     }
     // Soaked coworkers conduct beautifully.
     if (e.soaked > 0 && (info.kind === "zap" || info.kind === "chain")) dmg *= 2;
-    let killed = e.takeDamage(dmg, info.angle, info.knock * st.knockbackMult);
+    let killed = e.takeDamage(dmg, info.angle, info.knock * st.knockbackMult, info.kind !== "fire");
     if (!killed && fromPlayer && st.execute && !e.def.boss && e.hp / e.maxHp < st.execute) {
       e.hp = 0;
       killed = true;
