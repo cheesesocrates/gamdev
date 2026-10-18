@@ -83,7 +83,6 @@ export class Enemy {
   /** Office Romance: an ally only until the infatuation wears off. */
   charmed = false;
   private spreadT = 0;
-  private flameSpr?: Phaser.GameObjects.Image;
   /** The calculator / memo pad / phone in their hands. */
   private heldImg?: Phaser.GameObjects.Image;
   private throwHide = 0;
@@ -909,23 +908,16 @@ export class Enemy {
     }
 
     if (this.bubble && this.bubble.visible) this.bubble.setPosition(this.x, this.y - this.r - 26).setAlpha(this.vis);
-    if (this.burn > 0 && this.mode !== "npc") {
-      if (!this.flameSpr) this.flameSpr = g.add.image(this.x, this.y, "flame", 0).setOrigin(0.5, 0.95);
-      const t = g.time.now / 1000;
-      this.flameSpr.setVisible(this.sprite.visible).setAlpha(this.sprite.alpha)
-        .setFrame(Math.floor(t * 14 + this.id) % 6)
-        .setPosition(this.x + Math.sin(t * 6 + this.id) * 2, this.y + 6)
-        .setDepth(this.y + 7)
-        .setScale((0.75 + 0.1 * Math.sin(t * 10 + this.id)) * this.def.scale);
-    } else if (this.flameSpr?.visible) this.flameSpr.setVisible(false);
+    // On fire: a small blaze rides along (pooled by the hazards, which put it out once we stop drawing it).
+    if (this.burn > 0 && this.mode !== "npc") g.hazards.bodyFire(this.id, this.x, this.y, this.y + 7, this.def.scale, this.sprite.visible ? this.sprite.alpha : 0);
     void dt;
   }
 
   destroy() {
+    this.g.hazards.bodyFireOut(this.id);
     this.sprite.destroy();
     this.shadow.destroy();
     this.shield?.destroy();
-    this.flameSpr?.destroy();
     this.heldImg?.destroy();
     this.bubble?.destroy();
   }

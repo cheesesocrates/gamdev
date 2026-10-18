@@ -38,8 +38,12 @@ export class Effects {
     add("pixel", "px", { lifespan: { min: 250, max: 600 }, speed: { min: 60, max: 260 }, scale: { start: 1.2, end: 0 }, alpha: { start: 1, end: 0.3 } });
     add("confetti", "papershred", { lifespan: { min: 500, max: 1100 }, speed: { min: 80, max: 300 }, rotate: { min: 0, max: 360 }, scale: { start: 1, end: 0.6 }, alpha: { start: 1, end: 0 }, accelerationY: 260 });
     add("smoke", "fx_smoke_03", { lifespan: { min: 600, max: 1300 }, speed: { min: 15, max: 70 }, scale: { start: 0.12, end: 0.42 }, alpha: { start: 0.55, end: 0 }, rotate: { min: 0, max: 360 } });
-    add("ember", "fx_flame_03", { lifespan: { min: 300, max: 700 }, speed: { min: 20, max: 90 }, scale: { start: 0.14, end: 0 }, blendMode: "ADD", accelerationY: -120, tint: [0xffd27a, 0xff8a2a, 0xff5a1f] });
-    add("fire", "fx_flame_05", { lifespan: { min: 280, max: 520 }, speed: { min: 10, max: 50 }, scale: { start: 0.16, end: 0.02 }, alpha: { start: 0.95, end: 0 }, blendMode: "ADD", accelerationY: -160, angle: { min: 250, max: 290 }, tint: [0xffe08a, 0xff9a3a, 0xff5d2a] }, DEPTH.FX - 1);
+    // Embers: tiny glowing sparks that drift up and wink out.
+    add("ember", "soft", { lifespan: { min: 500, max: 1100 }, speed: { min: 30, max: 130 }, scale: { start: 0.16, end: 0 }, alpha: { start: 1, end: 0.3 }, blendMode: "ADD", accelerationY: -110, tint: [0xffc860, 0xff9a3a, 0xff6a24] });
+    // Fire: smoky fire puffs (Kenney Smoke Particles) born hot, rising and swelling as they cool to smoke.
+    add("fire", "fire_puff", { frame: [0, 1, 2, 3, 4, 5, 6, 7, 8], lifespan: { min: 320, max: 640 }, speed: { min: 10, max: 60 }, angle: { min: 240, max: 300 }, accelerationY: -140, scale: { start: 0.14, end: 0.46 }, alpha: { start: 1, end: 0 }, rotate: { min: 0, max: 360 }, color: [0xffe6c8, 0xffa060, 0xff6a34, 0x2e2420] }, DEPTH.FX - 1);
+    // Blast: the fireball a big burst of fire throws out (see burst), on top of its smoke.
+    add("blast", "fire_puff", { frame: [0, 1, 2, 3, 4, 5, 6, 7, 8], lifespan: { min: 260, max: 520 }, speed: { min: 50, max: 230 }, accelerationY: -70, scale: { start: 0.3, end: 0.74 }, alpha: { start: 1, end: 0 }, rotate: { min: 0, max: 360 }, color: [0xfff0d0, 0xffb468, 0xff6c34, 0x3a2a24] }, DEPTH.FX + 1);
     add("water", "px", { lifespan: { min: 300, max: 650 }, speed: { min: 80, max: 320 }, scale: { start: 1.4, end: 0.2 }, tint: [0x7fd0ff, 0xbfe8ff, 0x3aa6c9], accelerationY: 380 });
     add("coffee", "px", { lifespan: { min: 250, max: 550 }, speed: { min: 60, max: 260 }, scale: { start: 1.5, end: 0.2 }, tint: [0x7a4a24, 0x5a3416, 0xa36a3a], accelerationY: 300 });
     add("zap", "spark_line", { lifespan: { min: 90, max: 200 }, speed: { min: 40, max: 260 }, rotate: { min: 0, max: 360 }, scale: { start: 1, end: 0.2 }, blendMode: "ADD", tint: [0xbfefff, 0x6fd8ff, 0xffffff] });
@@ -52,6 +56,8 @@ export class Effects {
     if (!e) return;
     if (tint !== undefined) e.setParticleTint(Array.isArray(tint) ? tint[Math.floor(Math.random() * tint.length)] : tint);
     e.explode(count, x, y);
+    // A big burst of fire is an explosion: it throws out a fireball too.
+    if (name === "fire" && count >= 8) this.em.blast.explode(Math.round(count * 0.6), x, y);
   }
 
   /** Directional spray (e.g. sparks off a wall, confetti away from a hit). */

@@ -507,6 +507,87 @@ try {
       }
     }
   }
+
+  // Fire up close: a burning paper pile, bare-floor flickers and a burning coworker, in the fight's dark.
+  if (scenario === "fire") {
+    await page.mouse.move(640, 360);
+    await ev(() => { window.__HT.god(true); window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(1400);
+    const setup = await ev(() => {
+      const s = window.__HT.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      s.sprinklerCd = 999;
+      const pl = s.player;
+      s.hazards.paperPatch(pl.x + 210, pl.y + 90, 3);
+      s.hazards.igniteRadius(pl.x + 210, pl.y + 90, 160, 2);
+      // What an explosion leaves on bare floor: short flickers.
+      s.hazards.igniteRadius(pl.x - 210, pl.y + 100, 80, 4);
+      const p = s.world.nearestWalkable(pl.x - 90, pl.y - 50);
+      const e = s.spawnEnemy("fulltime", p.x, p.y, "hostile");
+      e.spawnGrace = 0;
+      e.stun = 30;
+      e.burn = 3;
+      e.burnDps = 1;
+      window.__fireE = e;
+      return { burning: s.hazards.fire.filter((f) => f > 0).length, paper: s.hazards.paper.filter((f) => f > 0).length };
+    });
+    console.log("fire", JSON.stringify(setup));
+    const keepBurning = () => ev(() => { const e = window.__fireE; if (e && !e.dead) { e.burn = 3; e.stun = 30; } });
+    const fireInfo = () => ev(() => { const s = window.__HT.scene; return { burning: s.hazards.burningCount, perf: window.__HT.perf(), hazards: window.__HT.prof().hazards }; });
+    await sleep(400);
+    await shot("f01-fire");
+    await keepBurning();
+    await sleep(600);
+    await shot("f02-fire");
+    console.log("fire", JSON.stringify(await fireInfo()));
+    // Cost of one hazards update with this blaze on screen (dt 0: nothing burns down), immune to frame pacing.
+    console.log("hazards.update ms", await ev(() => { const hz = window.__HT.scene.hazards; const t = performance.now(); for (let k = 0; k < 40; k++) hz.update(0); return +((performance.now() - t) / 40).toFixed(3); }));
+    await keepBurning();
+    await sleep(500);
+    await shot("f03-fire");
+    // A closer look (the camera zoom is only ever reset on resize).
+    const zoom = (k) => ev((f) => { const cam = window.__HT.scene.cameras.main; const z0 = cam.zoom; cam.setZoom(z0 * f); return z0; }, k);
+    const unzoom = (z0) => ev((v) => window.__HT.scene.cameras.main.setZoom(v), z0);
+    const z = await zoom(2);
+    await keepBurning();
+    await sleep(250);
+    await shot("f04-fire-zoom");
+    await unzoom(z);
+    // Frame pacing varies headless: wait on the fire itself (every tile dying down) for the next shots.
+    const hottest = () => ev(() => Math.max(...window.__HT.scene.hazards.fire));
+    for (let k = 0; k < 80 && (await hottest()) > 1.2; k++) { await keepBurning(); await sleep(100); }
+    console.log("fire", JSON.stringify(await fireInfo()));
+    await shot("f05-fire-dying");
+    for (let k = 0; k < 80 && (await fireInfo()).burning > 0; k++) { await keepBurning(); await sleep(150); }
+    await sleep(400);
+    const pools = () => ev(() => { const hz = window.__HT.scene.hazards; return { pooled: Object.fromEntries(Object.entries(hz.flamePools).map(([k, v]) => [k, v.length])), tiles: hz.flames.size, bodies: hz.bodies.size }; });
+    console.log("fire", JSON.stringify(await fireInfo()), JSON.stringify(await pools()));
+    await shot("f06-fire-out");
+    // The burning coworker on their own, up close.
+    await ev(() => { const s = window.__HT.scene, e = window.__fireE; const p = s.world.nearestWalkable(e.x + 80, e.y + 40); s.player.x = p.x; s.player.y = p.y; });
+    await keepBurning();
+    const z2 = await zoom(2.6);
+    await sleep(350);
+    await shot("f07-coworker-zoom");
+    await unzoom(z2);
+    // Put out (as a puddle would): the blaze must go back to the pool.
+    await ev(() => { window.__fireE.burn = 0; });
+    await sleep(400);
+    console.log("put out", JSON.stringify(await pools()));
+    // An explosion next to the player (no damage) and what it leaves behind.
+    await ev(() => { const s = window.__HT.scene; s.explosion(s.player.x + 170, s.player.y + 20, 150, 0, { friendly: true }); });
+    await sleep(30);
+    await shot("f08-explosion");
+    await sleep(200);
+    await shot("f09-explosion-after");
+    // A burning coworker who is removed takes their blaze with them at once.
+    await keepBurning();
+    await sleep(300);
+    console.log("removed", JSON.stringify(await ev(() => { const s = window.__HT.scene, e = window.__fireE; const before = s.hazards.bodies.size; s.removeEnemy(e); return { before, after: s.hazards.bodies.size }; })));
+  }
 } catch (e) {
   console.log("SCRIPT ERROR", e);
   await shot("zz-error").catch(() => {});
