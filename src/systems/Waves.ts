@@ -68,9 +68,9 @@ export class Waves {
     }
     if (g.phase !== "downsizing") return;
 
-    // Boss day: today's boss arrives once 40% of the quota is fired.
+    // Boss day: today's boss arrives once 40% of the quota is fired (the CEO doesn't wait that long: 25%).
     const cfg = g.dayCfg;
-    if (cfg.boss && !this.bossSpawned && g.fired >= Math.floor(g.quota * 0.4)) {
+    if (cfg.boss && !this.bossSpawned && g.fired >= Math.floor(g.quota * (cfg.bossType === "ceo" ? 0.25 : 0.4))) {
       this.bossSpawned = true;
       const el = pick(this.elevators.length ? this.elevators.map((e) => e.spawn) : g.map.spawns);
       this.queue.push({ type: cfg.bossType, spawn: el, t: 1.8 });
@@ -100,7 +100,9 @@ export class Waves {
   private pickSpawn(): SpawnDef {
     const g = this.g;
     const pl = g.player;
-    const cands = g.map.spawns.map((s) => ({ s, d: Math.hypot(s.x - pl.x, s.y - pl.y) }));
+    // The fire exit inside a code-locked room is out of bounds: anyone coming in there would be stuck behind the door.
+    const open = g.map.spawns.filter((s) => !g.inLockedRoom(s.x, s.y));
+    const cands = (open.length ? open : g.map.spawns).map((s) => ({ s, d: Math.hypot(s.x - pl.x, s.y - pl.y) }));
     const far = cands.filter((c) => c.d > 520);
     const pool = far.length ? far : cands;
     // Favour nearer-but-offscreen entrances so the fight comes to you.
@@ -125,14 +127,17 @@ export class Waves {
   private materialize(type: EnemyType, spawn: SpawnDef) {
     const g = this.g;
     const jitter = spawn.kind === "elevator" ? 30 : 18;
-    const p = g.world.nearestWalkable(spawn.x + rand(-jitter, jitter), spawn.y + rand(-6, 12));
+    const p = g.safeSpot(spawn.x + rand(-jitter, jitter), spawn.y + rand(-6, 12));
     const e = g.spawnEnemy(type, p.x, p.y, "hostile");
     e.spawnGrace = 0.35;
     if (spawn.kind === "elevator") {
       e.vy = 140;
       if (chance(0.15) && g.canBark()) e.say(pick(ELEVATOR_LINES), 1.4);
     }
-    if (ENEMIES[type].boss) this.boss = e;
     g.fx.burst("pixel", p.x, p.y, 6, 0xb8bfc9);
+    if (ENEMIES[type].boss) {
+      this.boss = e;
+      g.bossArrived(e);
+    }
   }
 }

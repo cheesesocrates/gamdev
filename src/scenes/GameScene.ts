@@ -7,15 +7,15 @@ import { buildFurniture, Chair, FurnObj } from "../world/Furniture";
 import { Hazards } from "../world/Hazards";
 import { Effects } from "../systems/Effects";
 import { AudioManager } from "../systems/Audio";
-import { GameState } from "../systems/GameState";
+import { GameState, RUN_DAYS } from "../systems/GameState";
 import { Station, Stations } from "../systems/Stations";
 import { Props } from "../world/Props";
 import { Waves } from "../systems/Waves";
 import { Player, PlayerInput } from "../entities/Player";
-import { Enemy } from "../entities/Enemy";
+import { CEO_LEAP_R, CEO_PHASES, Enemy } from "../entities/Enemy";
 import { Projectiles } from "../entities/Projectiles";
 import { Pickups } from "../entities/Pickups";
-import { CHORE_INFO, ChoreId, DayConfig, dayConfig } from "../data/days";
+import { CHORE_INFO, ChoreId, DayConfig, choreLength, dayConfig } from "../data/days";
 import { BOSS_INFO, ENEMIES, EnemyType } from "../data/enemies";
 import { buildOfficeSfx } from "../systems/OfficeSfx";
 import { Speakers } from "../systems/Speakers";
@@ -27,10 +27,11 @@ import { PerkDef } from "../data/perks";
 import { FLOOR_INDEX, WALL_INDEX } from "./BootScene";
 import { ArrowMark, UI } from "../ui/UI";
 import { MiniHandle, MiniSfx, openMini } from "../ui/Minigames";
+import { bindKonami, showCheats } from "../ui/Cheats";
 import { WEAPONS, WEAPON_DEFS, WeaponId } from "../data/weapons";
 import { angleDiff, chance, clamp, damp, formatClock, lerp, pick, rand, shuffle, weightedPick } from "../util/math";
 
-export type Phase = "title" | "lore" | "brief" | "crunch" | "review" | "announce" | "downsizing" | "dayclear" | "results" | "memo" | "gameover";
+export type Phase = "title" | "lore" | "brief" | "crunch" | "review" | "announce" | "downsizing" | "cutscene" | "dayclear" | "results" | "runend" | "memo" | "gameover";
 
 /** Blast radius of the Cold Caller's desk phones. */
 const PHONE_R = 105;
@@ -44,13 +45,21 @@ const LORE = [
   "Do your chores. Survive 5 PM. Whatever happens, don't get fired."
 ];
 
-/** The night-before memo line for each coworker type that shows up for the first time tomorrow. */
+/** Day 9: the CEO comes down to the floor in person (only that first time: never in endless). */
+const CEO_LINES = [
+  "So. You're the one costing me multiple employees.",
+  "I've read your performance review. Adequate. Barely.",
+  "Nothing personal. It's just business.",
+  "Let's discuss your severance package."
+];
+
+/** What the night-before memo says when a coworker type shows up for the first time tomorrow. */
 const NEW_TYPE_MEMO: Partial<Record<EnemyType, string>> = {
-  robot: "Due to budget cuts, AI robots will be added to divide the workload.",
-  hr: "Due to budget cuts, HR Directors will be walking the floor. With riot shields.",
-  burnout: "Due to budget cuts, vacations are cancelled. Expect burnt-out employees.",
-  manager: "Due to budget cuts, middle managers will now manage you personally.",
-  fulltime: "Due to budget cuts, full-time staff are now competing for your salary."
+  robot: "AI robots join the payroll",
+  hr: "HR Directors now carry riot shields",
+  burnout: "vacations are cancelled (expect burnouts)",
+  manager: "middle managers will micromanage you",
+  fulltime: "full-timers are after your salary"
 };
 
 type Keys = Record<"W" | "A" | "S" | "D" | "UP" | "DOWN" | "LEFT" | "RIGHT" | "SPACE" | "SHIFT" | "E" | "R" | "Q" | "F" | "ONE" | "TWO" | "THREE" | "ENTER" | "ESC" | "P" | "M", Phaser.Input.Keyboard.Key>;
@@ -224,7 +233,6 @@ export class GameScene extends Phaser.Scene {
 
     this.setupInput();
     const cam = this.cameras.main;
-    cam.setBounds(0, 0, WORLD_W, WORLD_H);
     cam.setBackgroundColor("#0b0c10");
     this.onResize();
     this.scale.on("resize", () => this.onResize());
@@ -246,6 +254,8 @@ export class GameScene extends Phaser.Scene {
     this.game.events.on(Phaser.Core.Events.BLUR, () => {
       if ((this.phase === "crunch" || this.phase === "downsizing") && !this.paused) this.togglePause();
     });
+    // Up up down down left right left right B A on the Performance Review opens the cheat sheet.
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, bindKonami(() => this.phase === "review", () => this.openCheats()));
 
     (window as unknown as Record<string, unknown>).__HT = {
       scene: this,
@@ -254,13 +264,17 @@ export class GameScene extends Phaser.Scene {
       toFight: () => this.debugToFight(),
       give: (id: string, n = 1) => { for (let i = 0; i < n; i++) GameState.addPerk(id); },
       god: (v = true) => { this.godMode = v; },
+      cheats: () => this.openCheats(),
       killAll: () => { for (const e of [...this.enemies]) if (e.hostile) this.killEnemy(e, true); },
       day: (d: number) => { GameState.day = d; this.startDay(d); },
       phase: () => this.phase,
       prof: () => Object.fromEntries(Object.entries(this.prof).map(([k, v]) => [k, +v.toFixed(2)])),
       perf: () => ({ updateMs: +this.perfMs.toFixed(2), fps: Math.round(this.game.loop.actualFps), enemies: this.enemies.length, projectiles: this.projectiles.list.filter((p) => p.active).length }),
       tp: (x: number, y: number) => { this.player.x = x; this.player.y = y; },
-      dayConfig: (d: number) => dayConfig(d)
+      dayConfig: (d: number) => dayConfig(d),
+      // Run debugging: __HT.endless() turns the run endless; __HT.boss() brings today's boss in now.
+      endless: (v = true) => { GameState.endless = v; },
+      boss: () => { if (this.phase === "downsizing" && this.dayCfg.boss) this.fired = Math.max(this.fired, Math.ceil(this.quota * 0.4)); }
     };
 
     this.enterTitle();
@@ -335,6 +349,9 @@ export class GameScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const h = this.scale.height;
     cam.setZoom(clamp(h / VIEW_WORLD_HEIGHT, 0.55, 1.8));
+    // Dead space past the outer walls: in a corner the camera can still move far enough to keep you clear of the HUD.
+    const padX = Math.round((this.scale.width / cam.zoom) * 0.35), padY = Math.round((h / cam.zoom) * 0.35);
+    cam.setBounds(-padX, -padY, WORLD_W + padX * 2, WORLD_H + padY * 2);
   }
 
   // ================================================================ flow: title / days
@@ -352,11 +369,28 @@ export class GameScene extends Phaser.Scene {
       this.ui.closeScreen("title");
       this.showLore(() => this.startRun());
     };
-    this.ui.showTitle(best ? `BEST: SURVIVED ${best.days} DAY${best.days === 1 ? "" : "S"} · ${best.fired} FIRED` : "", { play: go, tutorial: go });
+    this.ui.showTitle(this.bestLine(best), { play: go, tutorial: go });
+  }
+
+  /** "BEST: ..." on the title screen (a finished run says so). */
+  private bestLine(best: { days: number; fired: number } | null): string {
+    if (!best) return "";
+    const s = (n: number) => (n === 1 ? "" : "S");
+    if (best.days >= RUN_DAYS) {
+      const extra = best.days - RUN_DAYS;
+      return `BEST: RUN COMPLETE${extra > 0 ? ` + ${extra} ENDLESS DAY${s(extra)}` : ""} · ${best.fired} FIRED`;
+    }
+    return `BEST: SURVIVED ${best.days} DAY${s(best.days)} · ${best.fired} FIRED`;
+  }
+
+  /** "DAY 3 / 9" during a run, "DAY 12 · ENDLESS" after it. */
+  private dayTitle(day: number): string {
+    return day <= RUN_DAYS ? `DAY ${day} / ${RUN_DAYS}` : `DAY ${day} · ENDLESS`;
   }
 
   private startRun() {
     GameState.reset();
+    this.godMode = false;
     this.startDay(1);
   }
 
@@ -392,20 +426,21 @@ export class GameScene extends Phaser.Scene {
     this.hazards.clear();
     this.fx.clearDecals();
     this.stations.resetDay();
-    // Overnight repairs: glass panes and smashed walls come back.
+    // Overnight repairs: glass panes and smashed walls (the CEO's holes in the concrete too) come back.
     for (let i = 0; i < this.map.tiles.length; i++) {
       const t = this.map.tiles[i];
-      if (t !== Tile.GLASS && t !== Tile.DRYWALL) continue;
+      if (t !== Tile.GLASS && t !== Tile.DRYWALL && t !== Tile.WALL) continue;
       if (this.world.tiles[i] === t && t !== Tile.GLASS) continue;
       this.world.tiles[i] = t;
       if (t === Tile.GLASS) this.world.glassHp.set(i, 3);
       this.world.wallHp.delete(i);
-      if (t === Tile.DRYWALL) this.floorLayer.removeTileAt(i % MAP_W, Math.floor(i / MAP_W));
+      if (t !== Tile.GLASS) this.floorLayer.removeTileAt(i % MAP_W, Math.floor(i / MAP_W));
       this.placeWallTile(i % MAP_W, Math.floor(i / MAP_W));
       const above = i - MAP_W;
       if (above >= 0 && this.world.tiles[above] !== Tile.FLOOR) this.placeWallTile(above % MAP_W, Math.floor(above / MAP_W));
     }
     this.world.rebuildNav();
+    this.speakers.repairAll();
     this.props.reset();
     this.vault.setupDay(this.dayCfg.chores);
     this.stations.randomizeProps();
@@ -416,7 +451,7 @@ export class GameScene extends Phaser.Scene {
     this.sprinklerT = 0;
     this.chairs.forEach((c, k) => {
       const h = this.chairHomes[k];
-      c.x = h.x; c.y = h.y; c.rot = h.rot; c.vx = c.vy = c.spin = 0;
+      c.x = h.x; c.y = h.y; c.rot = h.rot; c.vx = c.vy = c.spin = 0; c.byPlayer = false;
       const deg = Math.round(Phaser.Math.RadToDeg(h.rot) / 90) * 90 % 360;
       c.sprite.setTexture(`furn_${c.base}_${(deg + 360) % 360}`).setPosition(c.x, c.y).setRotation(0).setDepth(c.y - 2);
     });
@@ -425,6 +460,7 @@ export class GameScene extends Phaser.Scene {
     p.y = this.map.playerSpawn.y;
     p.vx = p.vy = 0;
     p.dead = false;
+    p.cancelDash();
     p.invuln = p.stun = p.rolling = p.slip = 0;
     p.tempHp = 0;
     p.shredBag = 0;
@@ -452,7 +488,7 @@ export class GameScene extends Phaser.Scene {
     this.resetWorldForDay(day, cfg);
     this.ui.initMinimap(this.map, this.world);
     this.spawnNpcs(this.dayCfg.npcs);
-    this.crunchTotal = GameState.crunchSeconds();
+    this.crunchTotal = GameState.crunchSeconds() + this.dayCfg.extraTime;
     this.crunchLeft = this.crunchTotal;
     this.quota = this.dayCfg.quota;
     this.hurryVoiced = false;
@@ -470,17 +506,13 @@ export class GameScene extends Phaser.Scene {
     this.audio.setMusicRate(1);
     const g = this.dayCfg.growth;
     const sub = g === "more" ? "One more chore today" : g === "longer" ? "Chores take longer today" : "Chores due by 5 PM";
-    this.ui.banner(`DAY ${day}`, sub, g ? "#e9c25a" : "#ffffff", 2.4);
+    this.ui.banner(this.dayTitle(day), this.dayCfg.final ? "The CEO is in today" : sub, g || this.dayCfg.final ? "#e9c25a" : "#ffffff", 2.4);
     this.time.delayedCall(300, () => this.autoCompleteChores());
   }
 
   private spawnNpcs(n: number) {
     // Nobody sits in the code-locked room (they'd be stuck there at 5 PM).
-    const locked = this.vault.room ? this.map.zones.find((z) => z.name === this.vault.room!.name) : undefined;
-    const free = locked ? this.map.npcHomes.filter((h) => {
-      const tx = Math.floor(h.x / TILE), ty = Math.floor(h.y / TILE);
-      return tx < locked.x0 || tx > locked.x1 || ty < locked.y0 || ty > locked.y1;
-    }) : this.map.npcHomes;
+    const free = this.map.npcHomes.filter((h) => !this.inLockedRoom(h.x, h.y));
     const homes = shuffle([...free]).slice(0, n);
     const weights = Object.entries(this.dayCfg.weights)
       .filter(([t]) => !ENEMIES[t as EnemyType].boss)
@@ -538,7 +570,7 @@ export class GameScene extends Phaser.Scene {
 
   startMini(chore: ChoreId, onDone: () => void) {
     if (this.mini || this.phase !== "crunch") return;
-    const len = Math.max(0.5, (1 + this.dayCfg.lengthLevel * 0.35) * (0.6 + 0.4 * GameState.stats.interactMult));
+    const len = Math.max(0.5, choreLength(this.dayCfg.lengthLevel) * (0.6 + 0.4 * GameState.stats.interactMult));
     this.interactProgress = 0;
     this.ui.setPrompt(null);
     this.zoomMini();
@@ -632,6 +664,8 @@ export class GameScene extends Phaser.Scene {
   private endCrunch(early: boolean) {
     // Clocking out early pays overtime at half rate: upgrades are meant to be scarce.
     const leftover = early ? Math.floor(Math.max(0, this.crunchLeft) / 2) : 0;
+    // Nobody waits out the review stuck halfway through a wall.
+    this.player.finishDash();
     this.mini?.close();
     this.mini = null;
     this.unzoomMini();
@@ -679,8 +713,8 @@ export class GameScene extends Phaser.Scene {
     this.ui.showReview({
       bank: GameState.bank,
       notes: this.reviewNotes,
-      offers: this.reviewOffers.map((o) => ({ ...o, stacks: GameState.stack(o.perk.id) })),
-      guns: this.reviewGuns.map((g) => ({ ...WEAPON_DEFS[g.id], sold: g.sold, locked: gunBought && !g.sold })),
+      offers: this.reviewOffers.map((o) => ({ ...o, stacks: GameState.stack(o.perk.id), maxed: !o.sold && !GameState.canTake(o.perk), lockedBy: o.sold ? undefined : GameState.lockedBy(o.perk)?.name })),
+      guns: this.reviewGuns.map((g) => ({ ...WEAPON_DEFS[g.id], sold: g.sold, locked: !g.sold && (gunBought || GameState.unlocked[g.id]) })),
       healCost,
       canHeal: GameState.hp < GameState.stats.maxHp,
       rerollCost
@@ -700,7 +734,7 @@ export class GameScene extends Phaser.Scene {
       },
       buy: (i) => {
         const o = this.reviewOffers[i];
-        if (!o || o.sold || GameState.bank < o.perk.cost || !GameState.canTake(o.perk)) return;
+        if (!o || o.sold || GameState.bank < o.perk.cost || !GameState.canTake(o.perk) || GameState.lockedBy(o.perk)) return;
         GameState.bank -= o.perk.cost;
         GameState.addPerk(o.perk.id);
         o.sold = true;
@@ -751,7 +785,7 @@ export class GameScene extends Phaser.Scene {
     // Frame it in the top third, clear of the announcement text.
     if (sp) this.camFocus = { x: sp.x, y: sp.y + (this.scale.height / this.cameras.main.zoom) * 0.2 };
     at(1300, () => type(0, "BUDGET CUTS HAVE BEEN MADE."));
-    at(3300, () => type(1, "DOWNSIZING HAS BEGUN."));
+    at(3300, () => type(1, this.dayCfg.final ? "THE CEO WILL SEE YOU NOW." : "DOWNSIZING HAS BEGUN."));
     at(5200, () => {
       type(2, `${this.quota} WILL BE FIRED BY THE END OF TODAY.`, "red");
       for (const e of this.enemies) {
@@ -763,7 +797,7 @@ export class GameScene extends Phaser.Scene {
     });
     at(7600, () => type(3, "GOOD LUCK.", "huge"));
     this.speakers.say([
-      "Attention all staff. Due to budget cuts, downsizing has begun.",
+      this.dayCfg.final ? "This is your CEO speaking. Due to budget cuts, downsizing has begun." : "Attention all staff. Due to budget cuts, downsizing has begun.",
       `${this.quota} employees will be let go by the end of today. Good luck.`
     ], { chime: "down", caption: false }).then(() => {
       if (this.phase === "announce") at(500, () => this.toFight());
@@ -812,7 +846,7 @@ export class GameScene extends Phaser.Scene {
     const stx = GameState.stats;
     if (stx.fireDrill) this.time.delayedCall(700, () => { if (this.phase === "downsizing") this.activateSprinklers("FIRE DRILL!", "Everybody out... onto the wet floor."); });
     for (let k = 0; k < stx.plusOne; k++) {
-      const pt = this.world.nearestWalkable(this.player.x + rand(-50, 50), this.player.y + 50);
+      const pt = this.safeSpot(this.player.x + rand(-50, 50), this.player.y + 50);
       const a = this.spawnEnemy("intern", pt.x, pt.y, "ally");
       a.makeAlly(30);
       this.fx.text(pt.x, pt.y - 40, "PLUS ONE!", { color: "#9fd3a8", size: 15, pop: true });
@@ -865,14 +899,23 @@ export class GameScene extends Phaser.Scene {
     this.updateSprinklers(dt);
     this.updateHearts(dt);
     this.updateVortices(dt);
-    const bossAlive = this.waves.boss && !this.waves.boss.dead;
-    if (this.waves.boss && !this.waves.boss.dead) this.ui.setBoss(this.waves.boss.def.title, this.waves.boss.hp / this.waves.boss.maxHp);
+    const boss = this.waves.boss;
+    if (boss && !boss.dead) this.ui.setBoss(boss.def.bossKind === "ceo" ? `${boss.def.title} · ${CEO_PHASES[boss.ceoPhase - 1]}` : boss.def.title, boss.hp / boss.maxHp);
     else this.ui.setBoss(null, 0);
-    if (this.fired >= this.quota && !bossAlive) this.dayClear();
+    if (this.fired >= this.quota && !this.bossPending()) this.dayClear();
+  }
+
+  /** On a boss day the day isn't over until the boss has turned up and been fired (even if the quota is met first). */
+  private bossPending(): boolean {
+    if (!this.dayCfg.boss) return false;
+    const b = this.waves.boss;
+    return !this.waves.bossSpawned || !b || !b.dead;
   }
 
   private dayClear() {
     this.phase = "dayclear";
+    this.syncQuota();
+    for (const name of GameState.fightOver()) this.ui.toast(`${name} has worn off`, "#8b95a7", 3);
     this.fx.slowmo(0.3, 1.4);
     this.player.invuln = 99;
     this.player.setArmed(false);
@@ -917,41 +960,89 @@ export class GameScene extends Phaser.Scene {
       if (p) GameState.addPerk(p.id);
       this.audio.play("bell", { vol: 0.5, jitter: 0 });
       this.ui.closeScreen("results");
-      this.endOfDayMemo();
+      // Day 9 done: the run is complete. Cash out, or keep working.
+      if (this.dayCfg.final && !GameState.endless) this.showRunEnd();
+      else this.endOfDayMemo();
     });
   }
 
-  /** Before the next day: management's memo about what's harder tomorrow, read out over the PA. */
+  /** The end of a nine-day run: you outlasted the CEO. Cash out (back to the title) or go endless. */
+  private showRunEnd() {
+    this.phase = "runend";
+    this.ui.setHudMode("none");
+    this.audio.setMusic("review");
+    this.audio.play("applause", { vol: 0.7, jitter: 0 });
+    this.time.delayedCall(500, () => this.audio.play("chime_up", { vol: 0.55, jitter: 0 }));
+    const prev = this.loadBest();
+    const newBest = !prev || RUN_DAYS > prev.days || (RUN_DAYS === prev.days && GameState.totalFired > prev.fired);
+    if (newBest) this.saveBest({ days: RUN_DAYS, fired: GameState.totalFired });
+    this.ui.showRunEnd({
+      lines: [
+        ["Employee", "You (CEO, effective immediately)"],
+        ["Days survived", `${RUN_DAYS} of ${RUN_DAYS}`],
+        ["Coworkers fired", String(GameState.totalFired)],
+        ["Upgrades", String(Object.values(GameState.stacks).reduce((a, b) => a + b, 0))],
+        ["Bosses let go", "3"]
+      ],
+      newBest
+    }, {
+      endless: () => {
+        this.ui.closeScreen("runend");
+        GameState.endless = true;
+        this.endOfDayMemo();
+      },
+      cashOut: () => {
+        this.ui.closeScreen("runend");
+        this.enterTitle();
+      }
+    });
+  }
+
+  /** Before the next day: management's one-line memo about what's harder tomorrow, read out over the PA. */
   private endOfDayMemo() {
     const today = this.dayCfg;
     const next = dayConfig(GameState.day + 1, today.chores);
-    const lines = this.memoLines(today, next);
+    const memo = this.memoLines(today, next);
     this.phase = "memo";
     this.ui.setHudMode("none");
-    this.ui.showMemo({ day: next.day, lines }, () => {
+    this.ui.showMemo({ day: next.day, ...memo }, () => {
       this.speakers.cancel();
       this.ui.closeScreen("memo");
       this.startDay(next.day, next);
     });
-    this.speakers.say(lines.slice(0, 2), { chime: "down", caption: false });
+    this.speakers.say([`Due to budget cuts: ${memo.headline}.`], { chime: "down", caption: false });
   }
 
-  private memoLines(today: DayConfig, next: DayConfig): string[] {
-    const out: string[] = [];
-    if (next.boss) {
-      const kind = ENEMIES[next.bossType].bossKind;
-      if (kind) out.push(BOSS_INFO[kind].memo);
-    }
+  /**
+   * The night-before memo, two lines: the headline ("Due to budget cuts: <the biggest change>") and the rest of what
+   * you need for tomorrow (a second new threat if there is one, the chores, extra time on the clock, the quota).
+   */
+  memoLines(today: DayConfig, next: DayConfig): { headline: string; details: string } {
+    const kind = next.boss ? ENEMIES[next.bossType].bossKind : undefined;
+    const endless = next.day === RUN_DAYS + 1;
     const order: EnemyType[] = ["robot", "hr", "burnout", "manager", "fulltime"];
-    for (const t of order) {
-      if (out.length >= 2) break;
-      if (next.weights[t] && !today.weights[t] && NEW_TYPE_MEMO[t]) out.push(NEW_TYPE_MEMO[t]!);
+    const fresh = order.find((t) => next.weights[t] && !today.weights[t] && NEW_TYPE_MEMO[t]);
+    const more = next.growth === "more", longer = next.growth === "longer";
+    // The headline is the single biggest change: a boss, the endless contract, a new kind of coworker, the chores.
+    const headline = kind ? BOSS_INFO[kind].memo
+      : endless ? "your contract is now endless"
+        : fresh ? NEW_TYPE_MEMO[fresh]!
+          : more ? "one more chore on your plate"
+            : longer ? "every chore runs a little longer"
+              : "the elevators run more often";
+    const parts: string[] = [];
+    // A new kind of coworker the headline had no room for.
+    if (fresh && (kind || endless)) {
+      const t = NEW_TYPE_MEMO[fresh]!;
+      parts.push(t[0].toUpperCase() + t.slice(1));
     }
-    if (next.growth === "more") out.push("Due to budget cuts, you'll be covering one more chore.");
-    else if (next.growth === "longer") out.push("Due to budget cuts, every chore will take a little longer.");
-    if (out.length < 3 && next.spawnEvery < today.spawnEvery) out.push("Due to budget cuts, the elevators will be running more often.");
-    out.push(`Tomorrow's firing quota: ${next.quota} employees (+${next.quota - today.quota}).`);
-    return out.slice(0, 4);
+    // (When the headline is already about the chores, don't say it twice.)
+    const choresNews = !!(kind || endless || fresh);
+    parts.push(`${next.chores.length} chores${!choresNews ? "" : more ? " (one more)" : longer ? " (each a bit longer)" : ""}`);
+    const extra = next.extraTime - today.extraTime;
+    if (extra > 0) parts.push(`+${extra}s on the clock`);
+    parts.push(`quota ${next.quota}`);
+    return { headline, details: parts.join(" \u00b7 ") };
   }
 
   private gameOver() {
@@ -979,13 +1070,13 @@ export class GameScene extends Phaser.Scene {
       this.ui.showGameOver({
         lines: [
           ["Employee", "You (Executive, Top Earner)"],
-          ["Last day", `Day ${GameState.day}`],
+          ["Last day", GameState.day > RUN_DAYS ? `Day ${GameState.day} (endless)` : `Day ${GameState.day} of ${RUN_DAYS}`],
           ["Days survived", String(daysSurvived)],
           ["Coworkers fired", String(GameState.totalFired)],
           ["Upgrades", String(Object.values(GameState.stacks).reduce((a, b) => a + b, 0))],
           ["Reason", pick(["Budget cuts", "Restructuring", "Culture fit", "Synergy realignment", "Went over budget"])]
         ],
-        best: prev ? `Best: ${prev.days} day${prev.days === 1 ? "" : "s"}, ${prev.fired} fired` : "",
+        best: prev ? (prev.days >= RUN_DAYS ? `Best: run complete (${prev.days} days), ${prev.fired} fired` : `Best: ${prev.days} day${prev.days === 1 ? "" : "s"}, ${prev.fired} fired`) : "",
         newBest
       }, () => {
         this.ui.closeScreen("gameover");
@@ -1075,7 +1166,7 @@ export class GameScene extends Phaser.Scene {
     let best: Enemy | null = null;
     let bd = maxDist * maxDist;
     for (const e of this.enemies) {
-      if (e.dead || !e.hostile || exclude?.has(e.id)) continue;
+      if (e.dead || !e.hostile || e.untargetable || exclude?.has(e.id)) continue;
       const d2 = (e.x - x) ** 2 + (e.y - y) ** 2;
       if (d2 < bd) { bd = d2; best = e; }
     }
@@ -1095,7 +1186,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   hitEnemy(e: Enemy, dmg: number, info: HitInfo): boolean {
-    if (e.dead) return false;
+    // The CEO in mid-leap is out of reach; between phases nothing hurts him.
+    if (e.dead || e.untargetable) return false;
+    if (e.immune) {
+      if (!info.silent && this.time.now > this.immuneTextAt) {
+        this.immuneTextAt = this.time.now + 450;
+        this.fx.text(e.x, e.y - e.r - 20, "NOT NOW", { color: "#e9c25a", size: 15, dur: 0.5 });
+      }
+      return false;
+    }
     const st = GameState.stats;
     const fromPlayer = PLAYER_SOURCES.has(info.kind);
     let crit = false;
@@ -1105,6 +1204,14 @@ export class GameScene extends Phaser.Scene {
     }
     if (fromPlayer) dmg *= this.dayDamageBuff * (1 + Math.min(st.pyramid * 0.3, this.dayKills * 0.01 * (1 + st.pyramid)));
     if (fromPlayer && this.player.dugIn) dmg *= 1.4;
+    // THE CONSULTANT's synergy: while his interns are close, they soak up most of it.
+    if (e.def.bossKind === "consultant" && e.synergy > 0) {
+      dmg *= 0.25;
+      if (!info.silent && this.time.now > this.immuneTextAt) {
+        this.immuneTextAt = this.time.now + 600;
+        this.fx.text(e.x, e.y - e.r - 20, "SYNERGY", { color: "#e9c25a", size: 15, dur: 0.5 });
+      }
+    }
     // Sticky Notes: enough of them and a coworker just stands there, confused.
     if (fromPlayer && st.sticky && AIMED.has(info.kind) && !e.def.boss && e.hostile) {
       e.notes++;
@@ -1116,7 +1223,7 @@ export class GameScene extends Phaser.Scene {
     }
     // Soaked coworkers conduct beautifully.
     if (e.soaked > 0 && (info.kind === "zap" || info.kind === "chain")) dmg *= 2;
-    let killed = e.takeDamage(dmg, info.angle, info.knock * st.knockbackMult);
+    let killed = e.takeDamage(dmg, info.angle, info.knock * st.knockbackMult, info.kind !== "fire");
     if (!killed && fromPlayer && st.execute && !e.def.boss && e.hp / e.maxHp < st.execute) {
       e.hp = 0;
       killed = true;
@@ -1175,12 +1282,17 @@ export class GameScene extends Phaser.Scene {
     if (e.dead) return;
     const wasAlly = e.ally;
     const x = e.x, y = e.y;
+    // Finish off a robot that was shorting out and it goes off anyway.
+    const fried = e.shortT > 0;
+    e.shortT = 0;
     this.removeEnemy(e);
+    if (fried) this.robotBlast(x, y, e);
     if (wasAlly) return;
     const st = GameState.stats;
     this.fired++;
     GameState.totalFired++;
     GameState.dayStats.fired++;
+    if (this.phase === "downsizing") this.syncQuota();
 
     // Golden Handshake: every 4th firing pays a little overtime.
     if (byPlayer && st.handshake && ++this.handshakeCount % 4 === 0) {
@@ -1191,7 +1303,7 @@ export class GameScene extends Phaser.Scene {
     if (byPlayer && st.command && e.def.ranged && !e.def.boss) this.shockwave(x, y, 260, 0, 1.6, 0xe9c25a, "LEADERLESS!");
 
     const boss = e.def.boss;
-    this.fx.text(x, y - 36, boss ? "THE CONSULTANT HAS BEEN LET GO" : pick(FIRED_WORDS), { color: "#c4382c", size: boss ? 30 : 22, pop: true, dur: boss ? 2.2 : 1.0, rise: 50 });
+    this.fx.text(x, y - 36, boss ? `${e.def.title} HAS BEEN LET GO` : pick(FIRED_WORDS), { color: "#c4382c", size: boss ? 30 : 22, pop: true, dur: boss ? 2.2 : 1.0, rise: 50 });
     this.fx.burst("confetti", x, y, boss ? 60 : 16);
     this.fx.burst("pixel", x, y, 8, 0xf3eedf);
     this.fx.decal(x + rand(-6, 6), y + 10, "furn_belongings", { scale: boss ? 1.6 : 0.95, rot: rand(-0.4, 0.4) });
@@ -1205,8 +1317,19 @@ export class GameScene extends Phaser.Scene {
       this.ui.flash("#e9c25a", 500, 0.6);
       this.audio.play("applause", { vol: 0.7, jitter: 0 });
       this.audio.play("bell2", { vol: 0.55, jitter: 0 });
-      this.speakers.say(["Attention all staff. That position has been eliminated."], { chime: "up" });
+      const ceo = e.def.bossKind === "ceo";
+      this.speakers.say([ceo ? "Attention all staff. The position of CEO has been eliminated. Effective immediately." : "Attention all staff. That position has been eliminated."], { chime: "up" });
       for (let k = 0; k < 4; k++) this.pickups.spawn(k === 0 ? "pizza" : "donut", x, y);
+      if (ceo) {
+        // The big finish: his golden parachute bursts open over the whole floor.
+        this.fx.slowmo(0.2, 2.2);
+        this.ui.flash("#ffffff", 700, 0.8);
+        this.fx.burst("star", x, y, 40, 0xe9c25a);
+        this.fx.burst("confetti", x, y, 90);
+        this.fx.light(x, y, 0xffd36b, 9, 0.9);
+        for (let k = 0; k < 6; k++) this.time.delayedCall(140 * k, () => this.fx.burst("pixel", x + rand(-120, 120), y + rand(-90, 90), 16, [0xe9c25a, 0xfff2b0, 0xb98a1c]));
+        this.ui.banner("THE CEO HAS BEEN LET GO", "The corner office is yours", "#e9c25a", 3);
+      }
     }
 
     // combo
@@ -1301,6 +1424,23 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** A robot that shorted out in a puddle reaches the end of its fuse: it blows (a trap kill: your puddle did it). */
+  robotOverload(e: Enemy) {
+    if (e.dead) return;
+    const x = e.x, y = e.y;
+    e.shortT = 0;
+    this.robotBlast(x, y, e);
+    if (!e.dead && this.hitEnemy(e, e.hp + 1, { angle: 0, kind: "zap", x, y, knock: 0, silent: true, noChain: true, noCrit: true })) this.trapKill(x, y);
+  }
+
+  /** The bang of a fried robot: hurts the coworkers around it (never you), cracks glass, but leaves the walls standing. */
+  private robotBlast(x: number, y: number, skip: Enemy) {
+    this.fx.burst("zap", x, y, 16);
+    this.fx.light(x, y, 0x6fd8ff, 3.2, 0.3);
+    this.fx.text(x, y - 50, "KA-BZZT!", { color: "#9fe8ff", size: 22, pop: true, dur: 0.9 });
+    this.explosion(x, y, 125, 85 * GameState.stats.hazardMult, { friendly: true, skip, noSmash: true });
+  }
+
   /** A hazard the player set up finished off a coworker: pay out a little overtime so prep feels worth it. */
   trapKill(x: number, y: number) {
     if (this.phase !== "downsizing") return;
@@ -1308,7 +1448,7 @@ export class GameScene extends Phaser.Scene {
     this.fx.text(x, y - 44, "TRAP KILL +1s", { color: "#9fd3a8", size: 14, dur: 0.9 });
   }
 
-  explosion(x: number, y: number, radius: number, dmg: number, opts: { friendly: boolean; small?: boolean; skip?: Enemy; fromCopier?: boolean }) {
+  explosion(x: number, y: number, radius: number, dmg: number, opts: { friendly: boolean; small?: boolean; skip?: Enemy; fromCopier?: boolean; noSmash?: boolean }) {
     const hm = GameState.stats.hazardMult;
     const small = !!opts.small;
     this.fx.light(x, y, 0xd98a3a, radius / 26, small ? 0.18 : 0.35);
@@ -1339,7 +1479,7 @@ export class GameScene extends Phaser.Scene {
       if (((tx + 0.5) * TILE - x) ** 2 + ((ty + 0.5) * TILE - y) ** 2 < d2max) this.damageGlass(tx, ty, small ? 1 : 3);
     }
     if (!small) {
-      this.smashWalls(x, y, radius * 0.42);
+      if (!opts.noSmash) this.smashWalls(x, y, radius * 0.42);
       for (const s of this.stations.list) {
         if (s.hot && !s.wrecked && (s.x - x) ** 2 + (s.y - y) ** 2 < d2max * 1.2) this.time.delayedCall(160, () => this.stations.detonate(s));
       }
@@ -1352,10 +1492,12 @@ export class GameScene extends Phaser.Scene {
         c.vx += (dx / (d || 1)) * f;
         c.vy += (dy / (d || 1)) * f;
         c.spin += rand(-14, 14);
+        c.byPlayer = opts.friendly;
       }
     }
   }
 
+  private immuneTextAt = 0;
   private tipsShown = new Set<string>();
   /** Shows a gameplay tip the first time something happens in a run. */
   tipOnce(key: string, text: string, color = "#e9c25a") {
@@ -1371,17 +1513,117 @@ export class GameScene extends Phaser.Scene {
     return this.map.zoneGrid[ty * MAP_W + tx];
   }
 
+  /** Inside the code-locked room while its door is still shut: nobody spawns, wanders or phases in there. */
+  inLockedRoom(x: number, y: number): boolean {
+    const z = this.vault.lockedZone;
+    return z >= 0 && this.zoneAt(x, y) === z;
+  }
+
+  /** The nearest walkable spot to (x, y) outside the locked room (an elevator if that's all there is). */
+  safeSpot(x: number, y: number): { x: number; y: number } {
+    const p = this.world.nearestWalkable(x, y);
+    if (!this.inLockedRoom(p.x, p.y)) return p;
+    const lift = this.map.spawns.find((s) => s.kind === "elevator") ?? this.map.spawns[0];
+    return this.world.nearestWalkable(lift.x, lift.y);
+  }
+
+  /**
+   * Open-Plan Office: where a wall-phasing dash from (x, y) along the unit vector (dx, dy) ends. It passes through
+   * interior walls (drywall, concrete, glass, elevator doors) and furniture, but stops at the building's outer walls,
+   * the locked door and the edge of the locked room. It never ends inside anything: a dash that would stop inside a
+   * wall or a desk carries on (up to `extra` px) to come out the far side, or falls back to the last open spot before it.
+   * With `walls` off (the wall-phase cooldown) it still goes through desks but stops at walls. `wall` in the result:
+   * the dash really passed through a wall (exact test, so grazing a corner doesn't count).
+   */
+  phasePath(x: number, y: number, dx: number, dy: number, r: number, len: number, extra: number, walls = true): { x: number; y: number; wall: boolean } {
+    const fromLocked = this.inLockedRoom(x, y);
+    let ex = x, ey = y, crossed = false, wall = false;
+    for (let s = 2; s <= len + extra; s += 2) {
+      const px = x + dx * s, py = y + dy * s;
+      const k = this.phaseProbe(px, py, r, fromLocked);
+      if (k.stop || (k.inWall && !walls)) break;
+      if (k.inWall) crossed = true;
+      if (k.open) {
+        ex = px;
+        ey = py;
+        wall = crossed;
+        if (s >= len) break;
+      }
+    }
+    return { x: ex, y: ey, wall };
+  }
+
+  /**
+   * One step of a phase dash. `open`: nothing there at all (bounding-box test, conservative: safe to end on).
+   * `inWall`: the circle itself overlaps a wall tile (exact). `stop`: the building's edge or the locked room.
+   */
+  private phaseProbe(px: number, py: number, r: number, fromLocked: boolean): { open: boolean; inWall: boolean; stop: boolean } {
+    const tx0 = Math.floor((px - r) / TILE), tx1 = Math.floor((px + r) / TILE);
+    const ty0 = Math.floor((py - r) / TILE), ty1 = Math.floor((py + r) / TILE);
+    const locked = fromLocked ? -1 : this.vault.lockedZone;
+    let box = false, inWall = false;
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        // The outer walls are the edge of the building: never out of bounds.
+        if (tx <= 0 || ty <= 0 || tx >= MAP_W - 1 || ty >= MAP_H - 1) return { open: false, inWall: false, stop: true };
+        const t = this.world.tile(tx, ty);
+        if (t === Tile.LOCKED || (locked >= 0 && this.map.zoneGrid[ty * MAP_W + tx] === locked)) return { open: false, inWall: false, stop: true };
+        if (t === Tile.FLOOR) continue;
+        box = true;
+        const cx = clamp(px, tx * TILE, (tx + 1) * TILE), cy = clamp(py, ty * TILE, (ty + 1) * TILE);
+        if ((px - cx) ** 2 + (py - cy) ** 2 < r * r) inWall = true;
+      }
+    }
+    if (!box) this.world.queryBox(px - r, py - r, px + r, py + r, (c) => { if (c.solid && c.alive) box = true; });
+    return { open: !box, inWall, stop: false };
+  }
+
+  /** Somewhere for a coworker to wander off to before 5 PM (never the locked room). */
+  wanderSpot(): { x: number; y: number } {
+    const spots = this.map.wanderSpots.filter((s) => !this.inLockedRoom(s.x, s.y));
+    return pick(spots.length ? spots : this.map.wanderSpots);
+  }
+
+  /** Flow distance to the player from around a point (Infinity: there's no way to you from there). */
+  reachDist(x: number, y: number): number {
+    let best = Infinity;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) best = Math.min(best, this.flowNaive.distAt(x + dx * TILE, y + dy * TILE));
+    return best;
+  }
+
+  /**
+   * Safety net: a coworker with no way to reach you (walled in, stuck behind the locked door) comes back in through
+   * an entrance instead of holding up the quota forever. False if there's nowhere reachable to put them.
+   */
+  rescueStraggler(e: Enemy): boolean {
+    const spots = this.map.spawns.filter((s) => !this.inLockedRoom(s.x, s.y))
+      .map((s) => this.world.nearestWalkable(s.x, s.y))
+      .filter((p) => isFinite(this.reachDist(p.x, p.y)));
+    if (!spots.length) return false;
+    const wv = this.cameras.main.worldView;
+    const unseen = spots.filter((p) => !wv.contains(p.x, p.y));
+    const p = pick(unseen.length ? unseen : spots);
+    e.x = p.x;
+    e.y = p.y;
+    e.vx = e.vy = 0;
+    e.spawnGrace = Math.max(e.spawnGrace, 0.5);
+    this.fx.burst("pixel", p.x, p.y, 6, 0xb8bfc9);
+    return true;
+  }
+
   /** Breaks every drywall tile within radius of a point. Returns how many came down. */
-  smashWalls(x: number, y: number, radius: number): number {
+  /** Knocks down drywall (and with `concrete`, the CEO's charge, concrete too) within a radius. Returns how many tiles. */
+  smashWalls(x: number, y: number, radius: number, concrete = false): number {
     let n = 0;
     const r = Math.ceil(radius / TILE) + 1;
     const cx = Math.floor(x / TILE), cy = Math.floor(y / TILE);
     for (let ty = cy - r; ty <= cy + r; ty++) {
       for (let tx = cx - r; tx <= cx + r; tx++) {
-        if (this.world.tile(tx, ty) !== Tile.DRYWALL) continue;
+        const t = this.world.tile(tx, ty);
+        if (t !== Tile.DRYWALL && !(concrete && t === Tile.WALL && !this.wallGuarded(tx, ty))) continue;
         const nx = clamp(x, tx * TILE, (tx + 1) * TILE), ny = clamp(y, ty * TILE, (ty + 1) * TILE);
         if ((nx - x) ** 2 + (ny - y) ** 2 > radius * radius) continue;
-        if (this.world.damageWall(tx, ty, 99)) { this.onWallBroken(tx, ty); n++; }
+        if (this.world.damageWall(tx, ty, 99, concrete)) { this.onWallBroken(tx, ty); n++; }
       }
     }
     if (n) {
@@ -1395,7 +1637,24 @@ export class GameScene extends Phaser.Scene {
     return n;
   }
 
+  /**
+   * Concrete nothing may knock down: the building's outer walls, and anything next to the code-locked room, its door,
+   * a lift or the fire exit.
+   */
+  private wallGuarded(tx: number, ty: number): boolean {
+    if (tx <= 0 || ty <= 0 || tx >= MAP_W - 1 || ty >= MAP_H - 1) return true;
+    const locked = this.vault.lockedZone;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = tx + dx, ny = ty + dy;
+      const t = this.world.tile(nx, ny);
+      if (t === Tile.LOCKED || t === Tile.ELEVATOR || t === Tile.EXIT_DOOR) return true;
+      if (locked >= 0 && this.map.zoneGrid[ny * MAP_W + nx] === locked) return true;
+    }
+    return false;
+  }
+
   private onWallBroken(tx: number, ty: number) {
+    this.speakers.wallGone(tx, ty);
     // The hole takes the floor of whichever room it opened into.
     let mat = Mat.HALL as number;
     for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
@@ -1471,19 +1730,101 @@ export class GameScene extends Phaser.Scene {
   }
 
   bossIncoming(type: EnemyType) {
+    GameState.noteBoss(type);
     const def = ENEMIES[type];
     const info = BOSS_INFO[def.bossKind ?? "consultant"];
-    this.ui.banner(def.title, info.sub, "#e9c25a", 3);
     this.audio.play("alert", { vol: 0.6 });
-    this.speakers.say([info.pa], { chime: "down" });
     this.fx.shake(0.5);
+    // Day 9: the CEO gets an entrance of his own when the lift doors open (see startCeoCutscene).
+    if (type === "ceo" && this.dayCfg.final) {
+      this.speakers.say(["Attention all staff. The CEO is on his way down to the floor."], { chime: "down" });
+      return;
+    }
+    this.ui.banner(def.title, info.sub, "#e9c25a", 3);
+    this.speakers.say([info.pa], { chime: "down" });
+  }
+
+  /** The boss has stepped out of the lift. */
+  bossArrived(e: Enemy) {
+    if (e.def.bossKind === "ceo" && this.dayCfg.final && this.phase === "downsizing") this.startCeoCutscene(e);
+  }
+
+  // ================================================================ the CEO's entrance (day 9 only)
+  private cutscene: { ceo: Enemy; close: () => void } | null = null;
+
+  private startCeoCutscene(ceo: Enemy) {
+    this.phase = "cutscene";
+    const pl = this.player;
+    pl.finishDash();
+    pl.vx = pl.vy = 0;
+    pl.invuln = Math.max(pl.invuln, 3);
+    this.laserGfx.clear();
+    this.ui.setHudMode("none");
+    this.ui.setPrompt(null);
+    this.ui.setCombo(0, "");
+    // He's here: the PA ("on his way down") stops, so its caption doesn't sit on top of his lines.
+    this.speakers.cancel();
+    // The lights come straight up for the big entrance (no fog), and he strolls out of the lift while he talks.
+    this.vision.reset();
+    for (const e of this.enemies) e.vis = 1;
+    ceo.scriptTo = this.safeSpot(ceo.x, ceo.y + 150);
+    this.audio.setMusic("none", 0.6);
+    this.audio.play("ding", { vol: 0.6, jitter: 0 });
+    const cam = this.cameras.main;
+    this.tweens.killTweensOf(cam);
+    const z = cam.zoom;
+    this.tweens.add({ targets: cam, zoom: z * 1.25, duration: 900, ease: "Cubic.easeInOut" });
+    this.cutsceneZoom = z * 1.25;
+    this.frameCeo(ceo);
+    // A straight cut to him.
+    this.camX = this.camFocus!.x;
+    this.camY = this.camFocus!.y;
+    const close = this.ui.showCutscene("THE CEO", CEO_LINES, () => this.endCeoCutscene(z));
+    this.cutscene = { ceo, close };
+  }
+
+  private cutsceneZoom = 1;
+
+  /** Keeps the CEO in the upper part of the screen, clear of the dialogue box. */
+  private frameCeo(ceo: Enemy) {
+    this.camFocus = { x: ceo.x, y: ceo.y + (this.scale.height / this.cutsceneZoom) * 0.17 };
+  }
+
+  private updateCutscene(dt: number) {
+    const c = this.cutscene;
+    if (!c || c.ceo.dead) { this.endCeoCutscene(); return; }
+    c.ceo.update(dt);
+    this.frameCeo(c.ceo);
+  }
+
+  private endCeoCutscene(zoom?: number) {
+    const c = this.cutscene;
+    if (!c) return;
+    this.cutscene = null;
+    c.close();
+    c.ceo.scriptTo = null;
+    this.camFocus = null;
+    const cam = this.cameras.main;
+    this.tweens.killTweensOf(cam);
+    if (zoom) this.tweens.add({ targets: cam, zoom, duration: 500, ease: "Cubic.easeOut" });
+    else this.onResize();
+    if (this.phase !== "cutscene") return;
+    this.phase = "downsizing";
+    this.vision.target = 1;
+    this.player.invuln = Math.max(this.player.invuln, 1.2);
+    this.ui.setHudMode("fight");
+    this.audio.setMusic("fight", 0.3);
+    this.ui.banner(c.ceo.def.title, BOSS_INFO.ceo.sub, "#e9c25a", 2.6);
+    this.ui.flash("#e9c25a", 300, 0.45);
+    this.fx.shake(0.6);
+    this.audio.play("stomp", { vol: 0.8 });
   }
 
   // ================================================================ boss toys
-  /** A red lane on the floor where the Hatchet Man is about to charge (brighter as he commits). */
-  drawChargeLane(x: number, y: number, a: number, r: number, f: number) {
+  /** A red lane on the floor where a boss is about to charge (brighter as he commits). */
+  drawChargeLane(x: number, y: number, a: number, r: number, f: number, len = 900) {
     const g = this.teleGfx;
-    const len = 900, w = r * 1.1;
+    const w = r * 1.1;
     const c = Math.cos(a), s = Math.sin(a), nx = -s * w, ny = c * w;
     const ex = x + c * len, ey = y + s * len;
     g.fillStyle(0xc4382c, 0.08 + 0.2 * f);
@@ -1500,14 +1841,129 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** A charging boss hits whatever is ahead of it: drywall, glass, furniture, traps. */
-  bossSmash(e: Enemy, x: number, y: number, r: number) {
-    this.smashWalls(x, y, r);
-    const tr = Math.ceil(r / TILE) + 1, cx = Math.floor(x / TILE), cy = Math.floor(y / TILE);
+  /** The Consultant's synergy: a gold tether to every intern shielding him. */
+  drawTether(x0: number, y0: number, x1: number, y1: number) {
+    const g = this.teleGfx;
+    const k = 0.45 + 0.25 * Math.sin(this.time.now / 120);
+    g.lineStyle(5, 0xe9c25a, 0.18 * k).lineBetween(x0, y0, x1, y1);
+    g.lineStyle(2, 0xffe08a, 0.55 * k).lineBetween(x0, y0, x1, y1);
+  }
+
+  /** Where the CEO is coming down (f: 0 when he jumps, 1 as he lands). */
+  drawLandingZone(x: number, y: number, r: number, f: number) {
+    const g = this.teleGfx;
+    const blink = Math.sin(this.time.now / (90 - 55 * f)) > 0 ? 1 : 0.6;
+    g.fillStyle(0xc4382c, (0.08 + 0.18 * f) * blink).fillCircle(x, y, r);
+    g.lineStyle(4, 0xff6a55, (0.35 + 0.5 * f) * blink).strokeCircle(x, y, r);
+    g.lineStyle(3, 0xffd36b, 0.7 * blink).strokeCircle(x, y, Math.max(4, r * (1 - f)));
+  }
+
+  /** The CEO lands from a golden-parachute leap: a shockwave (a hit if you're in the ring), and from phase 2 a spray of coins. */
+  ceoLanding(e: Enemy, x: number, y: number) {
+    const R = CEO_LEAP_R, pl = this.player;
+    this.fx.shake(0.75);
+    this.fx.stop(60);
+    this.fx.burst("smoke", x, y + 10, 10, 0xd8c3a5);
+    this.fx.burst("pixel", x, y, 24, [0xe9c25a, 0xd8c3a5, 0x5b6380]);
+    this.fx.decal(x, y, "fx_scorch_02", { scale: R / 300, alpha: 0.5, tint: 0x111111 });
+    this.fx.light(x, y, 0xffd36b, R / 30, 0.25);
+    this.audio.play("stomp", { vol: 0.9 });
+    this.audio.play("boom", { vol: 0.5, rate: 0.8 });
+    const ring = this.add.circle(x, y, 20).setStrokeStyle(8, 0xe9c25a, 0.9).setDepth(DEPTH.FX);
+    this.tweens.add({ targets: ring, radius: R, alpha: 0, duration: 320, ease: "Cubic.easeOut", onComplete: () => ring.destroy() });
+    if (!pl.dead && pl.rolling <= 0 && (pl.x - x) ** 2 + (pl.y - y) ** 2 < (R + pl.r * 0.5) ** 2) pl.damage(2, x, y, "slam", e);
+    for (const o of [...this.enemies]) {
+      if (o === e || o.dead || o.mode === "npc" || (o.x - x) ** 2 + (o.y - y) ** 2 > (R + o.r) ** 2) continue;
+      o.stun = Math.max(o.stun, 0.6);
+      if (o.takeDamage(o.maxHp * 0.15, Math.atan2(o.y - y, o.x - x), 380)) this.killEnemy(o, false);
+    }
+    const tr = Math.ceil(R / TILE), cx = Math.floor(x / TILE), cy = Math.floor(y / TILE);
     for (let ty = cy - tr; ty <= cy + tr; ty++) for (let tx = cx - tr; tx <= cx + tr; tx++) {
-      if (this.world.tile(tx, ty) !== Tile.GLASS) continue;
-      const nx = clamp(x, tx * TILE, (tx + 1) * TILE), ny = clamp(y, ty * TILE, (ty + 1) * TILE);
-      if ((nx - x) ** 2 + (ny - y) ** 2 < r * r) this.damageGlass(tx, ty, 99);
+      if (this.world.tile(tx, ty) === Tile.GLASS && ((tx + 0.5) * TILE - x) ** 2 + ((ty + 0.5) * TILE - y) ** 2 < R * R) this.damageGlass(tx, ty, 2);
+    }
+    if (e.ceoPhase >= 2) {
+      const n = 10, off = rand(0, Math.PI * 2);
+      for (let k = 0; k < n; k++) this.projectiles.fireEnemy("coin", x, y, off + (k / n) * Math.PI * 2, 330, 1, e);
+    }
+  }
+
+  /** The CEO moves on to his next phase: a speech, a shockwave that clears the room, then the new tricks. */
+  ceoPhaseShift(e: Enemy, phase: number) {
+    const pl = this.player;
+    const speech = phase === 2 ? "Fine. Let's restructure." : "If I can't have this company, nobody can.";
+    e.say(speech, 2.2, "#e9c25a");
+    this.ui.banner(`PHASE ${phase}`, CEO_PHASES[phase - 1], "#e9c25a", 2.2);
+    this.ui.flash("#e9c25a", 300, 0.45);
+    this.fx.slowmo(0.5, 0.8);
+    this.audio.play("alert", { vol: 0.6 });
+    this.audio.play("chime_down", { vol: 0.5, jitter: 0 });
+    this.shockwave(e.x, e.y, 340, 0, 1.0, 0xe9c25a);
+    // You get blown back too (no harm done).
+    const d = Math.hypot(pl.x - e.x, pl.y - e.y);
+    if (d < 340) {
+      const a = Math.atan2(pl.y - e.y, pl.x - e.x);
+      pl.vx += Math.cos(a) * 520;
+      pl.vy += Math.sin(a) * 520;
+    }
+    if (phase === 2) {
+      // Restructuring: security comes up from HR.
+      for (const side of [-1, 1]) {
+        const p = this.safeSpot(e.x + side * 110, e.y + 40);
+        const guard = this.spawnEnemy("hr", p.x, p.y, "hostile");
+        guard.spawnGrace = 0.8;
+        this.fx.burst("pixel", p.x, p.y, 10, 0xb8bfc9);
+      }
+      this.speakers.say(["Attention all staff. Security to the floor."], { chime: "down" });
+    } else {
+      // Liquidation: the office goes up in flames.
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2 + rand(-0.2, 0.2), rr = rand(170, 330);
+        const p = this.world.nearestWalkable(e.x + Math.cos(a) * rr, e.y + Math.sin(a) * rr);
+        this.hazards.paperPatch(p.x, p.y, 1);
+        this.hazards.igniteRadius(p.x, p.y, 80, 2.5);
+        this.fx.burst("fire", p.x, p.y, 12);
+      }
+      this.fx.shake(0.5);
+      // He's had the sprinklers cut, and the music picks up.
+      this.audio.setMusicRate(1.1);
+      this.speakers.say(["Attention all staff. The building is on fire. The sprinkler budget has been liquidated. Please continue working."], { chime: "down" });
+    }
+  }
+
+  /** A burning budget report lands: it bursts into flames (a hit if you're right there). Swatted back, it burns them instead. */
+  reportLanded(x: number, y: number, friendly: boolean) {
+    const R = 70, pl = this.player;
+    this.fx.burst("fire", x, y, 18);
+    this.fx.burst("ember", x, y, 10);
+    this.fx.burst("smoke", x, y, 4);
+    this.fx.light(x, y, 0xff8a3a, 2.4, 0.3);
+    this.audio.play("fire", { vol: 0.5, minGap: 80 });
+    this.audio.play("pop", { vol: 0.35, minGap: 80 });
+    if (!friendly && !pl.dead && pl.rolling <= 0 && (pl.x - x) ** 2 + (pl.y - y) ** 2 < (R + pl.r * 0.5) ** 2) pl.damage(1, x, y, "fire");
+    for (const e of [...this.enemies]) {
+      if (e.dead || e.ally || (!friendly && e.def.boss) || (e.x - x) ** 2 + (e.y - y) ** 2 > (R + e.r) ** 2) continue;
+      if (friendly) this.hitEnemy(e, 60 * GameState.stats.dmgMult, { angle: Math.atan2(e.y - y, e.x - x), kind: "explosion", x: e.x, y: e.y, knock: 200 });
+      if (e.dead) continue;
+      e.burn = Math.max(e.burn, 2.5);
+      e.burnDps = Math.max(e.burnDps, 14);
+    }
+    this.hazards.paperPatch(x, y, 1);
+    this.hazards.igniteRadius(x, y, R, 2.2);
+  }
+
+  /**
+   * A charging boss hits whatever is ahead of it: drywall, glass, furniture, traps. With `walls` off (the Head of
+   * HR's shield bash) the walls and glass stand: he thuds into them.
+   */
+  bossSmash(e: Enemy, x: number, y: number, r: number, concrete = false, walls = true) {
+    const tr = Math.ceil(r / TILE) + 1, cx = Math.floor(x / TILE), cy = Math.floor(y / TILE);
+    if (walls) {
+      this.smashWalls(x, y, r, concrete);
+      for (let ty = cy - tr; ty <= cy + tr; ty++) for (let tx = cx - tr; tx <= cx + tr; tx++) {
+        if (this.world.tile(tx, ty) !== Tile.GLASS) continue;
+        const nx = clamp(x, tx * TILE, (tx + 1) * TILE), ny = clamp(y, ty * TILE, (ty + 1) * TILE);
+        if ((nx - x) ** 2 + (ny - y) ** 2 < r * r) this.damageGlass(tx, ty, 99);
+      }
     }
     const hits: FurnObj[] = [];
     this.world.queryBox(x - r, y - r, x + r, y + r, (c) => {
@@ -1531,6 +1987,7 @@ export class GameScene extends Phaser.Scene {
       c.vx += e.vx * 1.2;
       c.vy += e.vy * 1.2;
       c.spin += rand(-20, 20);
+      c.byPlayer = false;
     }
   }
 
@@ -1553,6 +2010,7 @@ export class GameScene extends Phaser.Scene {
   /** A thrown desk phone lands: it rings on the floor, then goes off. Swatted-back phones go off at once. */
   phoneLanded(x: number, y: number, friendly: boolean, owner: Enemy | null) {
     if (friendly) { this.phoneBlast(x, y, true, null); return; }
+    this.tipOnce("phones", "Ringing phones blow up a second after they land. Get out of the red ring! (A keyboard swing sends one back.)", "#e9c25a");
     const img = this.add.image(x, y, "i_phone").setDepth(y + 3).setScale(1.15);
     this.phoneBombs.push({ x, y, fuse: 1.05, ring: 0, img, owner });
     this.fx.burst("smoke", x, y + 6, 2, 0xd8c3a5);
@@ -1585,7 +2043,7 @@ export class GameScene extends Phaser.Scene {
     }
     // Where the phones in the air are going to land.
     for (const p of this.projectiles.list) {
-      if (!p.active || p.kind !== "phone" || p.friendly) continue;
+      if (!p.active || (p.kind !== "phone" && p.kind !== "report") || p.friendly) continue;
       g.lineStyle(2, 0xff6a55, 0.55);
       g.strokeCircle(p.tx, p.ty, PHONE_R);
       g.fillStyle(0xc4382c, 0.06);
@@ -1623,7 +2081,7 @@ export class GameScene extends Phaser.Scene {
   private clearPhoneBombs() {
     for (const b of this.phoneBombs) b.img.destroy();
     this.phoneBombs = [];
-    for (const p of this.projectiles.list) if (p.active && p.kind === "phone" && !p.friendly) { p.active = false; p.sprite.setVisible(false); }
+    for (const p of this.projectiles.list) if (p.active && (p.kind === "phone" || p.kind === "report") && !p.friendly) { p.active = false; p.sprite.setVisible(false); }
   }
 
   /** A ring blast from (x, y): damages, knocks back and stuns coworkers (never the player). */
@@ -1825,6 +2283,67 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private bodyPos = { x: 0, y: 0 };
+
+  /** Shoves a body through the collision world (so it slides along walls and desks); returns how far it really went. */
+  private shoveBody(b: { x: number; y: number; r: number }, dx: number, dy: number): number {
+    const p = this.bodyPos;
+    p.x = b.x;
+    p.y = b.y;
+    this.world.moveCircle(p, b.r, dx, dy);
+    const moved = Math.hypot(p.x - b.x, p.y - b.y);
+    b.x = p.x;
+    b.y = p.y;
+    return moved;
+  }
+
+  /**
+   * Nobody stands inside anybody: coworkers push each other apart (the lighter one gives way) and step out of your
+   * way. A charging boss ploughs through, a dodge-roll still slips through people, and if a coworker is pinned
+   * against a wall you're the one who stops.
+   */
+  private resolveBodies() {
+    const list = this.enemies, n = list.length;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < n; i++) {
+        const a = list[i];
+        if (a.dead || a.airborne) continue;
+        for (let j = i + 1; j < n; j++) {
+          const b = list[j];
+          if (b.dead || b.airborne) continue;
+          let dx = b.x - a.x, dy = b.y - a.y;
+          const rr = a.r + b.r, d2 = dx * dx + dy * dy;
+          if (d2 >= rr * rr) continue;
+          let d = Math.sqrt(d2);
+          if (d < 0.01) {
+            // Exactly on top of each other: split along a direction that's stable for this pair.
+            const ang = ((a.id * 7919 + b.id * 104729) % 628) / 100;
+            dx = Math.cos(ang); dy = Math.sin(ang); d = 0;
+          } else { dx /= d; dy /= d; }
+          const ma = a.rampaging ? 1e6 : a.mass, mb = b.rampaging ? 1e6 : b.mass;
+          const push = rr - d;
+          this.shoveBody(a, -dx * push * (mb / (ma + mb)), -dy * push * (mb / (ma + mb)));
+          this.shoveBody(b, dx * push * (ma / (ma + mb)), dy * push * (ma / (ma + mb)));
+        }
+      }
+    }
+    const pl = this.player;
+    if (pl.dead || pl.rolling > 0) return;
+    for (const e of list) {
+      if (e.dead || e.airborne) continue;
+      let dx = e.x - pl.x, dy = e.y - pl.y;
+      const rr = e.r + pl.r, d2 = dx * dx + dy * dy;
+      if (d2 >= rr * rr) continue;
+      let d = Math.sqrt(d2);
+      if (d < 0.01) { dx = Math.cos(e.id); dy = Math.sin(e.id); d = 0; } else { dx /= d; dy /= d; }
+      const push = rr - d;
+      // A charging boss runs you over (the hit and its knockback do the shoving); everyone else steps aside.
+      if (e.rampaging) continue;
+      const moved = this.shoveBody(e, dx * push, dy * push);
+      if (moved < push - 0.5) this.shoveBody(pl, -dx * (push - moved), -dy * (push - moved));
+    }
+  }
+
   private updateChairs(dt: number) {
     const movers: { x: number; y: number; vx: number; vy: number; r: number }[] = [this.player];
     for (const e of this.enemies) if (!e.dead && e.mode !== "npc") movers.push(e);
@@ -1834,6 +2353,9 @@ export class GameScene extends Phaser.Scene {
         const rr = m.r + 15;
         const d2 = dx * dx + dy * dy;
         if (d2 > rr * rr || d2 < 0.01) continue;
+        // Whoever shoves a chair owns it, unless it's already flying (a coworker can't take over your bowling ball).
+        if (m === this.player) c.byPlayer = true;
+        else if (Math.hypot(c.vx, c.vy) < 300) c.byPlayer = false;
         const d = Math.sqrt(d2);
         const push = rr - d;
         c.x += (dx / d) * push;
@@ -1845,12 +2367,13 @@ export class GameScene extends Phaser.Scene {
       }
       const sp = Math.abs(c.vx) + Math.abs(c.vy) + Math.abs(c.spin);
       if (sp < 0.5) continue;
-      // Office-chair bowling: fast chairs bowl coworkers over.
+      // Office-chair bowling: a chair you sent flying bowls over whoever it rolls into.
       const speed = Math.hypot(c.vx, c.vy);
-      if (speed > 300 && this.phase === "downsizing") {
+      if (speed > 300 && c.byPlayer && this.phase === "downsizing") {
         for (const e of [...this.enemies]) {
           if (e.dead || !e.hostile) continue;
           if ((e.x - c.x) ** 2 + (e.y - c.y) ** 2 > (e.r + 17) ** 2) continue;
+          if ((e.x - c.x) * c.vx + (e.y - c.y) * c.vy <= 0) continue;
           const ang = Math.atan2(c.vy, c.vx);
           e.stun = Math.max(e.stun, 0.7);
           this.fx.text(e.x, e.y - 40, "STRIKE!", { color: "#6aa3b4", size: 16, pop: true, dur: 0.7 });
@@ -1924,7 +2447,7 @@ export class GameScene extends Phaser.Scene {
         red = this.lightPhase > 2.4 ? 0.1 + 0.08 * Math.sin(this.lightPhase * 6) : 0;
         break;
       }
-      case "downsizing": case "dayclear": case "gameover": case "results":
+      case "downsizing": case "cutscene": case "dayclear": case "gameover": case "results": case "runend":
         c = 0xaeb0d4;
         red = 0.04 + 0.03 * Math.sin(this.lightPhase * 3.2);
         torch = 0.16;
@@ -1981,7 +2504,7 @@ export class GameScene extends Phaser.Scene {
       active: p.weapon,
       slots: WEAPONS.filter((w) => p.weaponUnlocked(w)).map((w, i) => ({ id: w, key: i + 1, name: WEAPON_DEFS[w].name, color: WEAPON_DEFS[w].color, ...p.ammoFor(w) }))
     });
-    this.ui.setDodge(p.dodgeCharges, st.dodgeCharges);
+    this.ui.setDodge(p.dodgeCharges, st.dodgeCharges, st.phaseDash ? p.wallReady : undefined);
     this.ui.setPerks(GameState.stacks, PERK_BY_ID);
     if (this.phase === "crunch") {
       this.ui.setClock(formatClock(Math.max(0, this.crunchLeft), this.crunchTotal), Math.max(0, this.crunchLeft), this.crunchLeft < 20, this.crunchTotal);
@@ -1990,7 +2513,12 @@ export class GameScene extends Phaser.Scene {
       this.ui.setChores(items, "");
       this.ui.setClockout(this.allChoresDone(), this.crunchLeft);
     }
-    if (this.phase === "downsizing") this.ui.setQuota(this.fired, this.quota);
+    if (this.phase === "downsizing" || this.phase === "dayclear") this.syncQuota();
+  }
+
+  /** The FIRED x / y bar. Also called on every firing and at the end of the day, so the last one always shows. */
+  private syncQuota() {
+    this.ui.setQuota(this.fired, this.quota, this.fired >= this.quota && this.bossPending());
   }
 
   private updateHudFast(dt: number) {
@@ -2118,6 +2646,21 @@ export class GameScene extends Phaser.Scene {
     if (this.phase === "announce") { this.briefing = false; this.startDownsizing(); }
   }
 
+  /** Debug: the cheat sheet over the Performance Review (Konami code, or __HT.cheats()). */
+  private openCheats() {
+    if (this.phase !== "review") return;
+    showCheats(this.ui, {
+      god: () => this.godMode,
+      setGod: (v) => { this.godMode = v; },
+      onClose: () => {
+        // Keys pressed or let go under the sheet never reached the game: start from a clean slate.
+        this.input.keyboard?.resetKeys();
+        this.pressed.clear();
+        if (this.phase === "review" && document.getElementById("review")) this.renderReview();
+      }
+    });
+  }
+
   // ================================================================ main loop
   perfMs = 0;
   /** Per-system frame cost (ms, smoothed) for profiling via __HT.prof(). */
@@ -2184,12 +2727,17 @@ export class GameScene extends Phaser.Scene {
       case "dayclear":
         this.player.update(dt, { ...inp, fire: false, firePressed: false, dodge: false });
         break;
+      case "cutscene":
+        this.updateCutscene(dt);
+        break;
       default:
         break;
     }
 
-    if (this.phase !== "review" && this.phase !== "results") {
+    // The CEO's entrance freezes the floor: only he moves.
+    if (this.phase !== "review" && this.phase !== "results" && this.phase !== "cutscene" && this.phase !== "runend") {
       this.timed("enemies", () => { for (const e of [...this.enemies]) e.update(dt); });
+      this.timed("bodies", () => this.resolveBodies());
       this.timed("projectiles", () => this.projectiles.update(dt));
       this.pickups.update(dt);
       this.timed("hazards", () => this.hazards.update(dt));
@@ -2243,7 +2791,10 @@ export class GameScene extends Phaser.Scene {
       }
       return;
     }
-    if (this.sprinklerCd <= 0 && this.hazards.burningCount >= 18) this.activateSprinklers("SPRINKLERS ACTIVATED", "Fire's out. Floor's wet. Mind the power strips.");
+    // (Not while the CEO is liquidating: he had the sprinklers cut.)
+    const b = this.waves.boss;
+    const liquidating = !!b && !b.dead && b.def.bossKind === "ceo" && b.ceoPhase >= 3;
+    if (this.sprinklerCd <= 0 && this.hazards.burningCount >= 18 && !liquidating) this.activateSprinklers("SPRINKLERS ACTIVATED", "Fire's out. Floor's wet. Mind the power strips.");
   }
 
   /** Ceiling sprinklers: douse the fires and leave small puddles all over the office. */

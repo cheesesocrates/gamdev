@@ -1,8 +1,9 @@
 import Phaser from "phaser";
-import { TILE } from "../config";
+import { DEPTH, TILE } from "../config";
 import { ChoreId } from "../data/days";
 import { WEAPONS, WEAPON_DEFS } from "../data/weapons";
-import { Tile } from "../world/OfficeMap";
+import { Tile, ZoneDef } from "../world/OfficeMap";
+import type { FurnObj } from "../world/Furniture";
 import { GameState } from "./GameState";
 import { pick, shuffle } from "../util/math";
 import type { GameScene } from "../scenes/GameScene";
@@ -53,6 +54,13 @@ export class Vault {
 
   get doorX() { return this.room ? (this.room.tx + 1) * TILE : 0; }
   get doorY() { return this.room ? (this.room.ty + 0.5) * TILE : 0; }
+
+  /** The zone index of the room behind the door while it's still locked (-1 otherwise). Nobody spawns or phases in there. */
+  get lockedZone(): number {
+    if (!this.room || this.open) return -1;
+    const name = this.room.name;
+    return this.g.map.zones.findIndex((z) => z.name === name);
+  }
 
   /** New day: yesterday's door is left open, a new one locks with a new code. */
   setupDay(chores: ChoreId[]) {
@@ -140,16 +148,41 @@ export class Vault {
     g.fx.burst("spark", this.doorX, this.doorY, 16, 0x8fe0a0);
     g.fx.text(this.doorX, this.doorY - 50, "ACCESS GRANTED", { color: "#8fe0a0", size: 22, pop: true, dur: 1.4 });
     this.syncHud();
-    // The golden briefcase sits in the middle of the room.
+    // The golden briefcase sits near the middle of the room, somewhere nothing is drawn over it.
     const z = g.map.zones.find((zz) => zz.name === r.name);
-    const cx = z ? ((z.x0 + z.x1 + 1) / 2) * TILE : this.doorX;
-    const cy = z ? ((z.y0 + z.y1 + 1) / 2) * TILE : this.doorY + (r.ty > 20 ? 200 : -200);
-    const p = g.world.nearestWalkable(cx, cy);
+    const p = z ? this.briefcaseSpot(z) : g.world.nearestWalkable(this.doorX, this.doorY + (r.ty > 20 ? 200 : -200));
     this.briefGlow = g.add.image(p.x, p.y, "soft").setBlendMode(Phaser.BlendModes.ADD).setTint(0xffd36b).setScale(1.6).setAlpha(0.6).setDepth(p.y - 1);
     this.brief = g.add.image(p.x, p.y, "i_briefcase").setDepth(p.y + 2);
     this.briefT = 0;
     this.briefY = p.y;
     g.tipOnce("briefcase", `The ${r.name} is open. Grab the golden briefcase!`, "#e9c25a");
+  }
+
+  /**
+   * The free floor spot closest to the middle of the room: walkable, clear of anything solid, and with no furniture
+   * sprite overlapping it (the room's centre can be under a coffee table, which would be drawn on top of the case).
+   */
+  private briefcaseSpot(z: ZoneDef): { x: number; y: number } {
+    const g = this.g;
+    const cx = ((z.x0 + z.x1 + 1) / 2) * TILE, cy = ((z.y0 + z.y1 + 1) / 2) * TILE;
+    // Rugs and things lying flat on the floor are drawn under the case anyway.
+    const art = [...g.furniture.values(), ...g.stations.list.map((s) => s.furn)]
+      .filter((f): f is FurnObj => !!f && !f.destroyed && f.sprite.visible && f.sprite.depth > DEPTH.MARKER)
+      .map((f) => f.sprite.getBounds());
+    const spots: { x: number; y: number; d: number }[] = [];
+    for (let ty = z.y0; ty <= z.y1; ty++) for (let tx = z.x0; tx <= z.x1; tx++) {
+      const x = (tx + 0.5) * TILE, y = (ty + 0.5) * TILE;
+      spots.push({ x, y, d: (x - cx) ** 2 + (y - cy) ** 2 });
+    }
+    spots.sort((a, b) => a.d - b.d);
+    const box = new Phaser.Geom.Rectangle(0, 0, 64, 60);
+    for (const s of spots) {
+      if (!g.world.walkableTile(Math.floor(s.x / TILE), Math.floor(s.y / TILE)) || !g.world.circleFree(s.x, s.y, 28)) continue;
+      box.setPosition(s.x - 32, s.y - 38);
+      if (art.some((b) => Phaser.Geom.Rectangle.Overlaps(b, box))) continue;
+      return s;
+    }
+    return g.world.nearestWalkable(cx, cy);
   }
 
   update(dt: number) {

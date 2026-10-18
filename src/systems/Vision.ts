@@ -134,8 +134,9 @@ export class Vision {
     }
     const g = this.g, cam = g.cameras.main, wv = cam.worldView, pl = g.player;
     if (this.cornerVer !== g.world.navVersion) this.rebuildCorners();
-    this.ox = pl.x;
-    this.oy = pl.y;
+    // Mid-phase through a wall you still see from the open floor you came from.
+    this.ox = pl.eyeX;
+    this.oy = pl.eyeY;
 
     // ---- rays
     const M = 96;

@@ -1,16 +1,16 @@
 import Phaser from "phaser";
 import { TILE } from "../config";
 import { SFX_FILES, MUSIC_FILES } from "../systems/Audio";
+import { ENEMIES, standPose } from "../data/enemies";
 
-export const CHAR_SPRITES = [
+/**
+ * The player's poses, then every coworker's sprite and the standing pose they use before 5 PM.
+ * Built from the enemy table so a coworker can never be missing its art (the Middle Manager once was).
+ */
+export const CHAR_SPRITES = [...new Set([
   "hitman1_gun", "hitman1_machine", "hitman1_silencer", "hitman1_stand", "hitman1_reload", "hitman1_hold",
-  "manBrown_hold", "womanGreen_hold", "survivor1_hold", "manBlue_hold", "manRed_hold",
-  "manOld_hold", "womanOld_hold", "hitman2_gun", "hitman2_machine", "survivor2_gun",
-  "soldier1_hold", "soldier2_hold", "zombie1_hold", "zombie2_hold", "robot1_machine", "robot2_machine",
-  "manBrown_stand", "womanGreen_stand", "survivor1_stand", "manBlue_stand", "manRed_stand",
-  "manOld_stand", "womanOld_stand", "hitman2_stand", "survivor2_stand", "soldier1_stand", "soldier2_stand",
-  "zombie1_stand", "zombie2_stand", "robot1_stand", "robot2_stand"
-];
+  ...Object.values(ENEMIES).flatMap((d) => d.sprites.flatMap((s) => [s, standPose(s)]))
+])];
 
 const PARTICLES = [
   "circle_05", "fire_01", "fire_02", "flame_01", "flame_03", "flame_05", "light_01", "magic_03",
@@ -61,6 +61,11 @@ export class BootScene extends Phaser.Scene {
     for (const i of ICONS) this.load.image(`icon_${i}`, `assets/icons/${i}.png`);
     for (const s of SFX_FILES) this.load.audio(`sfx_${s}`, `assets/audio/sfx/${s}.ogg`);
     for (const m of MUSIC_FILES) this.load.audio(`music_${m.key}`, `assets/audio/music/${m.file}`);
+    // Fire (Kenney Smoke Particles + Particle Pack): fire puffs, white-hot cores, flame tongues, black smoke.
+    this.load.spritesheet("fire_puff", "assets/particles/fire_puff.png", { frameWidth: 128, frameHeight: 128 });
+    this.load.spritesheet("fire_core", "assets/particles/fire_core.png", { frameWidth: 96, frameHeight: 96 });
+    this.load.spritesheet("fire_tongue", "assets/particles/fire_tongue.png", { frameWidth: 56, frameHeight: 132 });
+    this.load.spritesheet("fire_smoke", "assets/particles/fire_smoke.png", { frameWidth: 96, frameHeight: 96 });
   }
 
   create() {
@@ -516,6 +521,29 @@ function makeTextures(scene: Phaser.Scene) {
     ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(7, 3, 16, 1.4);
   });
 
+  // The CEO's bonus cheques, thrown in fans: gold coins.
+  canvasTexture(scene, "p_coin", 18, 18, (ctx) => {
+    ctx.fillStyle = "#7a5a14"; ctx.beginPath(); ctx.arc(9, 9, 8.5, 0, Math.PI * 2); ctx.fill();
+    const g = ctx.createRadialGradient(7, 6, 1, 9, 9, 8);
+    g.addColorStop(0, "#fff2b0"); g.addColorStop(0.55, "#f0c040"); g.addColorStop(1, "#b98a1c");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(9, 9, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#8a6514"; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(9, 9, 4.6, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = "#8a6514"; ctx.fillRect(8.2, 4.5, 1.6, 9);
+  });
+
+  // The CEO's last resort: a budget report on fire, lobbed like a grenade.
+  canvasTexture(scene, "p_report", 30, 30, (ctx) => {
+    ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fillRect(5, 11, 20, 16);
+    ctx.fillStyle = "#fbf8ee"; ctx.fillRect(3, 9, 20, 16);
+    ctx.strokeStyle = "#1c1d21"; ctx.lineWidth = 1.5; ctx.strokeRect(3.5, 9.5, 19, 15);
+    ctx.fillStyle = "#c4382c"; ctx.fillRect(6, 12, 9, 2.5);
+    ctx.fillStyle = "#9aa3b0"; for (let l = 0; l < 3; l++) ctx.fillRect(6, 16.5 + l * 2.6, 13, 1.2);
+    const f = ctx.createLinearGradient(0, 2, 0, 16);
+    f.addColorStop(0, "#ffe08a"); f.addColorStop(0.6, "#ff8a2a"); f.addColorStop(1, "#d8432a");
+    ctx.fillStyle = f;
+    ctx.beginPath(); ctx.moveTo(15, 14); ctx.quadraticCurveTo(14, 7, 20, 2); ctx.quadraticCurveTo(21, 8, 26, 9); ctx.quadraticCurveTo(28, 14, 23, 16); ctx.closePath(); ctx.fill();
+  });
+
   // The Hatchet Man's giant FIRED stamp (top-down).
   canvasTexture(scene, "i_stamp", 30, 26, (ctx) => {
     ctx.fillStyle = "#7d1f17"; ctx.fillRect(2, 5, 26, 16);
@@ -658,38 +686,6 @@ function makeTextures(scene: Phaser.Scene) {
       ctx.fill();
     }
   });
-
-  // Cartoon flame: six frames of flicker, used on burning tiles and burning coworkers.
-  {
-    const FW = 48, FH = 64, N = 6;
-    canvasTexture(scene, "flame", FW * N, FH, (ctx) => {
-      for (let k = 0; k < N; k++) {
-        const ph = (k / N) * Math.PI * 2;
-        const cx = k * FW + FW / 2, base = FH - 3;
-        const lay = (w: number, h: number, sway: number, color: string) => {
-          const tipX = cx + Math.sin(ph) * sway, tipY = base - h;
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.moveTo(cx - w / 2, base - h * 0.3);
-          ctx.bezierCurveTo(cx - w / 2, base + 3, cx + w / 2, base + 3, cx + w / 2, base - h * 0.3);
-          ctx.bezierCurveTo(cx + w / 2, base - h * 0.62, tipX + w * 0.18, tipY + h * 0.3, tipX, tipY);
-          ctx.bezierCurveTo(tipX - w * 0.2, tipY + h * 0.34, cx - w / 2, base - h * 0.6, cx - w / 2, base - h * 0.3);
-          ctx.fill();
-        };
-        lay(42, 54 + Math.sin(ph * 2) * 5, 8, "#d8432a");
-        lay(32, 43 + Math.cos(ph * 2) * 4, 7, "#f0862a");
-        lay(20, 30 + Math.sin(ph * 3) * 3, 5, "#ffcf4a");
-        lay(10, 15 + Math.cos(ph) * 2, 2, "#fff2b0");
-        // a little detached lick of fire that flickers away
-        ctx.fillStyle = "#f0862a";
-        ctx.beginPath();
-        ctx.arc(cx + Math.cos(ph) * 9, base - 50 - Math.sin(ph) * 5, 3 + Math.sin(ph * 2), 0, Math.PI * 2);
-        ctx.fill();
-      }
-    });
-    const t = scene.textures.get("flame");
-    for (let k = 0; k < N; k++) t.add(k, 0, k * FW, 0, FW, FH);
-  }
 
   // Water layer stamps (tinted per pass when painting puddles).
   canvasTexture(scene, "w_disc", 64, 64, (ctx) => {

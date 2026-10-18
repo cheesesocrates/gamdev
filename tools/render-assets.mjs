@@ -51,10 +51,14 @@ try {
     if (mode === "render") fs.mkdirSync(outDir, { recursive: true });
     const manifest = {};
     const tiles = [];
+    // Hand-drawn sprites (spec.handDrawn) keep their file and manifest entry when re-rendering.
+    const manifestPath = path.join(outDir, "manifest.json");
+    const kept = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, "utf8")) : {};
     for (const spec of SPECS) {
       const rots = spec.rots ?? [0];
       for (const rot of rots) {
         const key = rots.length > 1 || rot !== 0 ? `${spec.key}_${rot}` : spec.key;
+        if (mode === "render" && spec.handDrawn && kept[key]) { manifest[key] = kept[key]; continue; }
         const res = await page.evaluate(
           (s, o) => window.renderItem(s, o),
           { ...spec, rotY: rot },

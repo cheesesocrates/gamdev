@@ -5,7 +5,7 @@ import { NPC_SABOTAGE } from "../data/lines";
 import { GameState } from "./GameState";
 import { chance, pick, rand } from "../util/math";
 import { StationDef } from "../world/OfficeMap";
-import { FurnObj, destroyFurniture, spawnFurniture } from "../world/Furniture";
+import { FurnObj, destroyFurniture, setFurnTexture, spawnFurniture } from "../world/Furniture";
 import type { GameScene } from "../scenes/GameScene";
 
 export interface Station {
@@ -175,7 +175,8 @@ export class Stations {
   }
 
   private addProp(kind: DailyProp, x: number, y: number) {
-    const furn = spawnFurniture(this.g, this.g.world, kind, x, y, kind === "powerstrip" ? { solid: false, shots: false } : {});
+    // Power strips lie flat on the carpet: never drawn over the people walking past them.
+    const furn = spawnFurniture(this.g, this.g.world, kind, x, y, kind === "powerstrip" ? { solid: false, shots: false, flat: true } : {});
     const s = this.make({ id: `${kind}_${this.list.length}`, kind, x, y }, furn);
     s.dynamic = true;
     this.list.push(s);
@@ -344,7 +345,7 @@ export class Stations {
     if (s.used) return;
     s.used = true;
     const spr = s.furn?.sprite as Phaser.GameObjects.Image | undefined;
-    spr?.setTexture("furn_cooler_tipped");
+    if (spr) setFurnTexture(g, spr, "cooler_tipped");
     g.hazards.flood(s.x, s.y + 30, GameState.stats.bigPuddles ? 46 : 22);
     g.audio.play("splash", { vol: 0.7 });
     g.audio.play("soft_heavy", { vol: 0.5 });

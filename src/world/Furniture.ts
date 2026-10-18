@@ -37,6 +37,8 @@ export interface Chair {
   rot: number; // radians, snapped to 4 sprite directions
   spin: number;
   sprite: Phaser.GameObjects.Image;
+  /** Last sent flying by the boss (you): only then does it bowl coworkers over. */
+  byPlayer: boolean;
 }
 
 export function baseKey(key: string) {
@@ -58,7 +60,7 @@ export function buildFurniture(scene: Phaser.Scene, map: OfficeMap, world: World
       const me = manifest[p.key];
       if (me) sprite.setOrigin(me.anchorX, me.anchorY);
       sprite.setDepth(p.y + 8);
-      chairs.push({ base, x: p.x, y: p.y, vx: 0, vy: 0, rot, spin: 0, sprite });
+      chairs.push({ base, x: p.x, y: p.y, vx: 0, vy: 0, rot, spin: 0, sprite, byPlayer: false });
       continue;
     }
 
@@ -101,15 +103,21 @@ export function buildFurniture(scene: Phaser.Scene, map: OfficeMap, world: World
   return { furniture, chairs };
 }
 
-/** Creates one piece of furniture mid-game (daily water coolers and power strips). */
-export function spawnFurniture(scene: Phaser.Scene, world: World, key: string, x: number, y: number, opts: { solid?: boolean; shots?: boolean } = {}): FurnObj {
+/** Above puddles and loose paper, below the fire glow and everyone standing on the floor. */
+export const FLAT_DEPTH = DEPTH.HAZARD + 1.5;
+
+/**
+ * Creates one piece of furniture mid-game (daily water coolers and power strips). `flat` things lie on the floor
+ * (power strips): they're drawn under every character instead of being depth-sorted like a desk.
+ */
+export function spawnFurniture(scene: Phaser.Scene, world: World, key: string, x: number, y: number, opts: { solid?: boolean; shots?: boolean; flat?: boolean } = {}): FurnObj {
   const manifest = scene.cache.json.get("furnManifest") as Record<string, ManifestEntry>;
   const me = manifest[key];
   const w = me ? Math.max(14, me.footW * PPU * 0.94) : 40;
   const h = me ? Math.max(14, me.footD * PPU * 0.94) : 40;
   const sprite = scene.add.image(x, y, `furn_${key}`);
   if (me) sprite.setOrigin(me.anchorX, me.anchorY);
-  sprite.setDepth(y + h / 2);
+  sprite.setDepth(opts.flat ? FLAT_DEPTH : y + h / 2);
   const b = baseKey(key);
   const solid = opts.solid ?? !NOT_SOLID.has(b);
   const shots = opts.shots ?? (solid && !NO_SHOTS.has(b));
@@ -118,6 +126,13 @@ export function spawnFurniture(scene: Phaser.Scene, world: World, key: string, x
   return obj;
 }
 let spawnCounter = 0;
+
+/** Swaps a furniture sprite's art (a cooler kicked over) and re-anchors it, since each sprite has its own ground point. */
+export function setFurnTexture(scene: Phaser.Scene, sprite: Phaser.GameObjects.Image, key: string) {
+  sprite.setTexture(`furn_${key}`);
+  const me = (scene.cache.json.get("furnManifest") as Record<string, ManifestEntry>)[key];
+  if (me) sprite.setOrigin(me.anchorX, me.anchorY);
+}
 
 export function destroyFurniture(world: World, f: FurnObj) {
   f.sprite.destroy();

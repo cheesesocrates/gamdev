@@ -7,6 +7,8 @@ interface Speaker {
   x: number;
   y: number;
   img: Phaser.GameObjects.Image;
+  /** The wall tile it hangs on was knocked down (back up overnight). */
+  down?: boolean;
 }
 
 export interface SayOpts {
@@ -66,10 +68,30 @@ export class Speakers {
 
   get speaking() { return this.talking > 0; }
 
+  /** A wall came down: any speaker hanging on it falls off (sparks) until the overnight repairs. */
+  wallGone(tx: number, ty: number) {
+    for (const s of this.list) {
+      if (s.down || Math.floor(s.x / TILE) !== tx || Math.floor((s.y - 34) / TILE) !== ty) continue;
+      s.down = true;
+      s.img.setVisible(false);
+      this.g.fx.burst("spark", s.x, s.y, 8, 0x9fe8ff);
+      this.g.fx.burst("pixel", s.x, s.y, 10, [0x2b2f3a, 0x5b6380]);
+    }
+  }
+
+  /** Overnight: every speaker is back on its wall. */
+  repairAll() {
+    for (const s of this.list) {
+      s.down = false;
+      s.img.setVisible(true);
+    }
+  }
+
   /** The speaker nearest a point (for the camera to look at during the 5 PM announcement). */
   nearest(x: number, y: number): Speaker | null {
     let best: Speaker | null = null, bd = Infinity;
     for (const s of this.list) {
+      if (s.down) continue;
       const d = (s.x - x) ** 2 + (s.y - y) ** 2;
       if (d < bd) { bd = d; best = s; }
     }
@@ -131,7 +153,7 @@ export class Speakers {
     this.talkT += dt;
     const wv = this.g.cameras.main.worldView;
     for (const s of this.list) {
-      if (s.x < wv.x - 80 || s.x > wv.right + 80 || s.y < wv.y - 80 || s.y > wv.bottom + 80) continue;
+      if (s.down || s.x < wv.x - 80 || s.x > wv.right + 80 || s.y < wv.y - 80 || s.y > wv.bottom + 80) continue;
       const beat = 0.5 + 0.5 * Math.sin(this.talkT * 22 + s.x * 0.01);
       s.img.setScale(1 + beat * 0.07);
       for (let k = 0; k < 3; k++) {

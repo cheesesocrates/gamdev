@@ -46,7 +46,8 @@ export interface GunOffer { id: string; name: string; desc: string; color: strin
 export interface ReviewData {
   bank: number;
   notes: { text: string; kind: "good" | "bad" | "" }[];
-  offers: { perk: PerkDef; sold: boolean; stacks: number }[];
+  /** `maxed`: you already have every stack of it. `lockedBy`: an upgrade you own makes it pointless. Neither can be bought. */
+  offers: { perk: PerkDef; sold: boolean; stacks: number; maxed?: boolean; lockedBy?: string }[];
   guns: GunOffer[];
   healCost: number;
   canHeal: boolean;
@@ -147,7 +148,7 @@ export class UI {
   /** Cards and gun offers lift a little on hover. */
   private lift(el: HTMLElement) {
     el.addEventListener("pointerenter", () => {
-      if (el.classList.contains("sold") || el.classList.contains("locked")) return;
+      if (el.classList.contains("sold") || el.classList.contains("locked") || el.classList.contains("maxed")) return;
       gsap.to(el, { y: -10, duration: 0.25, ease: "back.out(2.5)" });
       this.sfx?.("hover");
     });
@@ -315,11 +316,12 @@ export class UI {
     });
   }
 
-  setQuota(fired: number, quota: number) {
-    this.set("quota", `${fired}|${quota}`, () => {
+  /** `bossLeft`: the quota is met but today's boss is still on the floor. */
+  setQuota(fired: number, quota: number, bossLeft = false) {
+    this.set("quota", `${fired}|${quota}|${bossLeft}`, () => {
       const q = $(".h-quota", this.root);
-      $(".ql span", q).innerHTML = `FIRED <b>${Math.min(fired, quota)}</b> / ${quota}`;
-      ($(".bar i", q)).style.width = `${Math.min(100, (fired / quota) * 100)}%`;
+      $(".ql span", q).innerHTML = bossLeft ? `QUOTA MET: <b>FIRE THE BOSS</b>` : `FIRED <b>${Math.min(fired, quota)}</b> / ${quota}`;
+      ($(".bar i", q)).style.width = `${Math.min(100, (fired / Math.max(1, quota)) * 100)}%`;
       if (fired > 0) gsap.fromTo($(".ql", q), { scale: 1.15 }, { scale: 1, duration: 0.3, ease: "back.out(3)" });
     });
   }
@@ -385,10 +387,12 @@ export class UI {
     });
   }
 
-  setDodge(charges: number, max: number) {
-    this.set("dodge", `${charges}|${max}`, () => {
+  /** `wall`: Open-Plan Office only. Whether the next dash can phase through a wall (undefined: no such upgrade). */
+  setDodge(charges: number, max: number, wall?: boolean) {
+    this.set("dodge", `${charges}|${max}|${wall}`, () => {
       let h = "";
       for (let i = 0; i < max; i++) h += `<i class="${i < charges ? "on" : ""}"></i>`;
+      if (wall !== undefined) h += `<b class="wall ${wall ? "on" : ""}">WALL</b>`;
       $(".dodge .pips", this.root).innerHTML = h;
     });
   }
@@ -728,11 +732,12 @@ export class UI {
       this.countUp(bankEl, Math.floor(d.bank), (v) => `${v}s`, prev, 0.4);
       gsap.fromTo($(".rv-bank", el), { scale: 0.9 }, { scale: 1, duration: 0.4, ease: "back.out(3)" });
     }
-    const stamp = (c: HTMLElement, text: string) => {
+    const stamp = (c: HTMLElement, text: string, cls = "", loud = true) => {
       const st = document.createElement("div");
-      st.className = "stamp";
+      st.className = `stamp ${cls}`;
       st.textContent = text;
       c.appendChild(st);
+      if (!loud) return;
       gsap.fromTo(st, { scale: 2.6, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.25, ease: "power3.in" });
       this.sfx?.("stamp");
     };
@@ -741,12 +746,23 @@ export class UI {
       if (!c) return;
       const afford = d.bank >= o.perk.cost;
       const wasSold = c.classList.contains("sold");
+      // Bought (or maxed out, or locked by an upgrade you own): stamped, greyed out, no price tag, nothing to click.
+      const maxed = !o.sold && (!!o.maxed || !!o.lockedBy);
       c.classList.toggle("sold", o.sold);
-      c.classList.toggle("buyable", !o.sold && afford);
-      c.classList.toggle("poor", !o.sold && !afford);
+      c.classList.toggle("maxed", maxed);
+      c.classList.toggle("buyable", !o.sold && !maxed && afford);
+      c.classList.toggle("poor", !o.sold && !maxed && !afford);
       const own = $(".c-own", c);
       if (own) own.textContent = o.stacks > 0 ? `${o.stacks}/${o.perk.max}` : "";
-      if (o.sold && !wasSold) stamp(c, "HIRED");
+      if (o.sold && !wasSold) { c.querySelector(".stamp")?.remove(); stamp(c, "APPROVED"); }
+      if (maxed && !c.querySelector(".stamp")) {
+        stamp(c, o.lockedBy ? "LOCKED" : "MAXED", "grey", false);
+        if (o.lockedBy) {
+          c.querySelector(".stamp")!.insertAdjacentHTML("afterbegin", `<span class="lk">${ICON.lock}</span>`);
+          c.title = `Locked: ${o.lockedBy} bypasses this`;
+        }
+      }
+      if (!maxed && !o.sold) c.querySelector(".stamp.grey")?.remove();
     });
     d.guns.forEach((g, i) => {
       const c = el.querySelector<HTMLElement>(`.gun[data-g="${i}"]`);
@@ -843,15 +859,14 @@ export class UI {
     gsap.delayedCall(0.55, () => next());
   }
 
-  /** End of the day: management's memo about what changes tomorrow (read out over the PA). */
-  showMemo(d: { day: number; lines: string[] }, onDone: () => void) {
+  /** End of the day: management's one-line memo about what changes tomorrow (read out over the PA). */
+  showMemo(d: { day: number; headline: string; details: string }, onDone: () => void) {
     const el = this.screen("memo", "dim", `
       <div class="memo clickable">
         <div class="m-paper">
           <div class="m-head"><span>INTERNAL MEMO</span><span class="m-day">DAY ${d.day}</span></div>
-          <div class="m-meta"><div><b>TO:</b> All Staff</div><div><b>FROM:</b> Management</div><div><b>RE:</b> Tomorrow</div></div>
-          <ul class="m-lines">${d.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>
-          <div class="m-sign">Thank you for your continued sacrifice.</div>
+          <p class="m-line"><b>Due to budget cuts:</b> ${esc(d.headline)}.</p>
+          <p class="m-sub">Tomorrow: ${d.details.split(" · ").map((t) => `<span>${esc(t)}</span>`).join(" · ")}.</p>
           <div class="m-stamp">BUDGET CUTS</div>
         </div>
         <button class="btn big red" id="mgo">CLOCK IN FOR DAY ${d.day}</button>
@@ -869,8 +884,8 @@ export class UI {
     window.addEventListener("keydown", onKey, true);
     $("#mgo", el).addEventListener("click", go);
     this.slideUp([...el.querySelectorAll(".m-paper, #mgo")]);
-    gsap.from(el.querySelectorAll(".m-lines li"), { x: -24, opacity: 0, duration: 0.35, delay: 0.45, stagger: 0.18, ease: "power3.out" });
-    gsap.fromTo($(".m-stamp", el), { scale: 3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.28, delay: 0.9 + d.lines.length * 0.18, ease: "power4.in", onComplete: () => this.sfx?.("stamp") });
+    gsap.from(el.querySelectorAll(".m-line, .m-sub"), { x: -24, opacity: 0, duration: 0.35, delay: 0.45, stagger: 0.18, ease: "power3.out" });
+    gsap.fromTo($(".m-stamp", el), { scale: 3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.28, delay: 1.1, ease: "power4.in", onComplete: () => this.sfx?.("stamp") });
   }
 
   showAnnounce(onSkip: () => void): (i: number, text: string, cls?: string) => void {
@@ -920,6 +935,91 @@ export class UI {
         gsap.to(c, { y: -20, duration: 0.35, delay: 0.25, ease: "power3.out", onComplete: () => onPick(Number(c.dataset.i)) });
       });
     });
+  }
+
+  /**
+   * A cutscene: letterbox bars and a dialogue box, the lines typed out one at a time. Click, Space or Enter goes on,
+   * Esc or SKIP skips. `onDone` runs once, when it's over; the returned function just takes it down (no callback).
+   */
+  showCutscene(speaker: string, lines: string[], onDone: () => void): () => void {
+    const el = this.screen("cutscene", "", `
+      <div class="cs-bar top"></div><div class="cs-bar bottom"></div>
+      <div class="cs-box"><div class="cs-name">${esc(speaker)}</div><p class="cs-line"></p><div class="cs-hint">CLICK TO CONTINUE</div></div>
+      <button class="btn ghost small cs-skip" id="csskip">SKIP</button>`);
+    const line = $(".cs-line", el), hint = $(".cs-hint", el);
+    let i = -1, over = false, typing: gsap.core.Tween | null = null;
+    const cleanup = () => {
+      over = true;
+      window.removeEventListener("keydown", onKey, true);
+      typing?.kill();
+    };
+    const finish = () => {
+      if (over) return;
+      cleanup();
+      onDone();
+    };
+    const next = () => {
+      if (over) return;
+      if (typing && typing.isActive()) { typing.progress(1); return; }
+      i++;
+      if (i >= lines.length) { finish(); return; }
+      const text = lines[i];
+      const o = { n: 0 };
+      line.textContent = "";
+      typing = gsap.to(o, {
+        n: text.length, duration: Math.min(1.8, text.length * 0.035), ease: "none",
+        onUpdate: () => {
+          const n = Math.round(o.n);
+          if (n > (line.textContent?.length ?? 0) && text[n - 1] !== " ") this.sfx?.("type");
+          line.textContent = text.slice(0, n);
+        },
+        onComplete: () => {
+          line.textContent = text;
+          hint.textContent = i === lines.length - 1 ? "CLICK TO FIGHT" : "CLICK TO CONTINUE";
+        }
+      });
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (!document.getElementById("cutscene")) { window.removeEventListener("keydown", onKey, true); return; }
+      // Nothing gets through to the (frozen) game while he's talking.
+      e.stopPropagation();
+      if (e.code === "Space" || e.code === "Enter") { e.preventDefault(); if (!e.repeat && !this.guarded(el)) next(); }
+      else if (e.code === "Escape") { e.preventDefault(); if (!this.guarded(el)) finish(); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    el.addEventListener("click", (e) => {
+      if (this.guarded(el)) return;
+      if ((e.target as HTMLElement).closest("#csskip")) { finish(); return; }
+      next();
+    });
+    gsap.from($(".cs-bar.top", el), { yPercent: -100, duration: 0.5, ease: "power3.out" });
+    gsap.from($(".cs-bar.bottom", el), { yPercent: 100, duration: 0.5, ease: "power3.out" });
+    gsap.from($(".cs-box", el), { y: 60, opacity: 0, duration: 0.45, delay: 0.3, ease: "back.out(1.6)" });
+    gsap.delayedCall(0.7, next);
+    return () => {
+      cleanup();
+      gsap.killTweensOf(next);
+      this.closeScreen("cutscene");
+    };
+  }
+
+  /** The end of a nine-day run: a letter of promotion, then cash out (back to the title) or keep working (endless). */
+  showRunEnd(d: { lines: [string, string][]; newBest: boolean }, h: { endless: () => void; cashOut: () => void }) {
+    const el = this.screen("runend", "", `
+      <div class="re clickable">
+        <div class="re-letter"><h5>LETTER OF PROMOTION</h5><p class="re-sub">You outlasted the budget cuts, three bosses and the CEO himself.</p>${d.lines.map(([k, v]) => `<div class="row"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("")}<div class="stamp">PROMOTED</div></div>
+        ${d.newBest ? `<div class="go-best">NEW PERSONAL BEST!</div>` : ""}
+        <div class="re-q">The board would like you to stay on. Keep working?</div>
+        <div class="go-btns">
+          <button class="btn big red" id="reEndless">KEEP WORKING (ENDLESS)</button>
+          <button class="btn big ghost" id="reCash">CASH OUT</button>
+        </div>
+      </div>`);
+    this.slideUp(el.querySelectorAll(".re-letter, .go-best, .re-q, .go-btns"));
+    gsap.fromTo($(".re-letter .stamp", el), { scale: 3.5, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.28, delay: 0.6, ease: "power4.in", onComplete: () => this.sfx?.("stamp") });
+    let chosen = false;
+    $("#reEndless", el).addEventListener("click", () => { if (!this.guarded(el) && !chosen) { chosen = true; h.endless(); } });
+    $("#reCash", el).addEventListener("click", () => { if (!this.guarded(el) && !chosen) { chosen = true; h.cashOut(); } });
   }
 
   showGameOver(d: { lines: [string, string][]; best: string; newBest: boolean }, onRestart: () => void, onTitle: () => void) {

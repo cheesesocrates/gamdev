@@ -3,7 +3,7 @@
 A top-down office survival shooter made for the NASCON '26 game jam (themes: **Time** and **Fire**).
 
 You're the best employee this office has ever had, and the most expensive. You have until **5:00 PM** to finish your
-chores. Then the budget cuts land, and every coworker on the floor has done the math: your salary pays for five of theirs.
+chores. Then the budget cuts land, and every coworker on the floor has done the math: your salary pays for several of theirs.
 
 **Team docs:** [CHANGELOG.md](CHANGELOG.md) (every change, newest first) · [docs/TEAM_PLAN.md](docs/TEAM_PLAN.md) (who owns what)
 
@@ -25,11 +25,12 @@ works from any folder.
 Each phase explains itself once with a rules card before it starts. **TUTORIAL** on the title screen shows them again.
 Menus slide up and ignore clicks for half a second, so a stray click never buys or skips anything.
 
-1. **Crunch Time (120 s):** a clock ticks from 3:00 to 5:00 PM. Walk to the glowing stations on your sticky note and
-   press **E**. Every chore is a small mini-game that looks like the job (12 of them, up to 7 a day): water a plant
-   that won't sit still, line a page up on the copier, feed the shredder, tighten the coffee machine's leaks, stop the
-   deck on the GROWTH slide, sign layoff memos, patch server cables, type a reply-all, unjam a printer, reset the Wi-Fi,
-   sort the mail, clean a whiteboard. **Mistakes cost a second.**
+1. **Crunch Time (120 s, +4 s a day from day 4, up to +20 s):** a clock ticks from 3:00 to 5:00 PM. Walk to the
+   glowing stations on your sticky note and press **E**. Every chore is a small mini-game that looks like the job
+   (12 of them, up to 6 a day): water a plant that won't sit still, line a page up on the copier, drag documents into
+   the shredder at a steady speed, tighten the coffee machine's leaks, stop the deck on the GROWTH slide, sign layoff
+   memos, patch server cables, type a reply-all, unjam a printer, keep the Wi-Fi router's antennas on the signal as it
+   drifts, sort the mail, clean a whiteboard. **Mistakes cost a second.** Later days add a chore or make them a bit longer.
    Chores move around: printers, the Wi-Fi router and the mail cart turn up in new rooms and halls every day, and a
    chore can be done at any copier, shredder or whiteboard the to-do list points to. Water coolers and power strips
    also spawn in new places every day, so scout them. Done early? Press **ENTER**: half of the time left is banked as
@@ -45,8 +46,15 @@ Menus slide up and ignore clicks for half a second, so a stray click never buys 
 4. **The Downsizing:** the lights go out. Walls block your view (windows and desks don't), and coworkers you can't see
    fade into the dark. Fire the quota before they fire you. Press **E** by a cooler, power strip, copier, toilet,
    vending machine or fridge and the trap or bonus goes off instantly. Clear the quota to pick one free chore-stage
-   upgrade (the only place those appear), read management's memo about what gets harder tomorrow ("Due to budget cuts,
-   AI robots will be added to divide the workload"), then do it all again.
+   upgrade (the only place those appear), read management's two-line memo about tomorrow ("**Due to budget cuts:** AI
+   robots join the payroll." / "Tomorrow: 5 chores (one more) · +4s on the clock · quota 22."), then do it all again.
+
+### A run
+A run is **nine days**. Day 3 and day 6 each bring a boss drawn from the Hatchet Man, the Cold Caller, the
+Consultant and the Head of HR (never the same one twice, and day 3 is never one of the last two you met), and day 9
+is the finale against **the CEO**. Beat him and you get a Letter of
+Promotion: **CASH OUT** (the run counts as complete) or **KEEP WORKING** in endless mode, where a boss still turns up
+every third day, the CEO every ninth, and every nine days they get tougher.
 
 ### Controls
 | | |
@@ -54,7 +62,7 @@ Menus slide up and ignore clicks for half a second, so a stray click never buys 
 | WASD / arrows | Move |
 | Mouse | Aim. Click to fire (the stapler and toner are one shot per click, the rest fire while held) |
 | Mouse wheel / Q / 1-9 | Switch weapon (the hotbar shows the guns you own, in a fixed order) |
-| Space / Shift / right-click | Dodge roll (i-frames; roll into desks to send them flying) |
+| Space / Shift / right-click | Dodge roll (i-frames; roll into desks to send them flying). With Open-Plan Office it's a dash through walls |
 | E | Chores, traps, refills |
 | R | Reload the stapler |
 | Enter | Clock out early (all chores done) |
@@ -67,11 +75,14 @@ puddles (22s) · Hot Coffee shotgun (24s) · homing Paper Planes (28s) · Confet
 the fight starts; scroll to switch.
 
 ### The office fights back
-- Puddles make coworkers slip; an overloaded power strip electrifies the whole puddle. Traps never hurt you.
+- Puddles make coworkers slip; an overloaded power strip electrifies the whole puddle. A live puddle hurts for as
+  long as they stand in it (and slows them to a wade); AI robots short out in any puddle and blow up. A boss stuck in
+  live water for 3 seconds gets insulated for a few seconds so he can walk out. Traps never hurt you.
 - Shredded paper burns and fire spreads along it. Overheated copiers blow up (E arms one with a 3-second fuse).
 - Too much fire trips the sprinklers: they douse the flames and flood small patches all over the floor.
 - Desks, tables and boxes can be shoved; a dodge-rolled desk bowls coworkers over.
-- Interior walls are drywall: bosses and big blasts smash through them. Everything is repaired overnight.
+- Interior walls are drywall: bosses and big blasts smash through them (the CEO goes through concrete too).
+  Everything is repaired overnight.
 
 ### Coworkers
 Runners duck behind desks when you can see them and rush you when you're close or reloading. Shooters keep their
@@ -79,16 +90,28 @@ distance. HR Directors carry riot shields: slip them in water, bonk them with th
 wall to hit them. Some coworkers wait in other rooms and ambush you together. Coworkers who throw things hold them
 (calculators, memo pads, phones).
 
-**Bosses, every third day:** **The Hatchet Man** (day 3) stomps, locks on and charges in a straight line through
-drywall, glass and furniture; dodge so he slams into concrete and he's dizzy. **The Cold Caller** (day 6) lobs ringing
-desk phones that blow up a second after they land (swat one back with the keyboard). **The Consultant** (day 9) sprays
-memos and calls in interns. Then round again, tougher.
+**Bosses, every third day:** **The Hatchet Man** stomps, locks on and charges in a straight line through drywall,
+glass and furniture; dodge so he slams into concrete and he's dizzy. **The Cold Caller** lobs ringing desk phones
+that blow up a second after they land (swat one back with the keyboard), and when hurt, a conference call drops a
+ring of them around you. **The Consultant** brings in interns who shield him (fire them first) and, below half
+health, pivots: a full ring of memos. **The Head of HR** hides behind a riot shield (he turns slowly: flank him, bank
+shots off walls or bonk it aside), stuns with a megaphone, calls in staff for Mandatory Training, and shield-bashes;
+make him bash into a wall and he's stunned with his guard down.
+
+**The CEO** (day 9) comes down in the lift for a cutscene, then fights in three phases, each with its own share of
+his health. He has his own moves (fans of gold coins, golden-parachute leaps that land on a red ring) and borrows
+everyone else's: the Hatchet Man's charge, except nothing inside the building stops it (only the outer walls, the
+locked room and heavy machines do, and then he's dizzy); from phase 2, security from HR and the Cold Caller's
+conference call; in phase 3, burning budget reports, the office on fire with the sprinklers cut, the Consultant's
+pivot (a ring of coins and memos), and charges in pairs.
 
 ### Upgrades
-68 of them (13 are chore-stage picks), in four rarities (the clipboard's colour), each with its own pen-drawn logo: the classics (ricochet, piercing, multishot, homing, explosive
-shots, chain lightning) and game-changers like Black Hole Binder (vortex shots), Office Romance (a dodge heart that
-charms a coworker), Blame Game (whoever hits you becomes everyone's target), Cubicle Ninja, Corner Office, Sticky
-Notes, Hostile Work Environment and Golden Handshake. See `src/data/perks.ts`.
+69 of them (13 are chore-stage picks), in four rarities (the clipboard's colour), each with its own pen-drawn logo: the
+classics (ricochet, piercing, multishot, homing, explosive shots, chain lightning) and game-changers like Black Hole
+Binder (vortex shots), Office Romance (a dodge heart that charms a coworker), Blame Game (whoever hits you becomes
+everyone's target), Open-Plan Office (the dodge becomes a dash through walls, with a cooldown on walls; it locks Desk
+Jockey), Electric Personality (every puddle is live, for two fights), Cubicle Ninja, Corner Office, Sticky Notes,
+Hostile Work Environment and Golden Handshake. See `src/data/perks.ts`.
 
 ## Project layout
 
@@ -146,8 +169,17 @@ __HT.give("binder", 2)  // grant upgrades (ids in src/data/perks.ts)
 __HT.day(3)             // jump to a day (3, 6, 9... = boss)
 __HT.god()              // invincible
 __HT.killAll()          // fire everyone
+__HT.boss()             // bring today's boss in now (boss days)
+__HT.endless()          // turn the run endless
 __HT.perf(); __HT.prof() // frame cost overall / per system
 ```
+
+**Cheat sheet:** on the Performance Review, type the Konami code (up up down down left right left right B A). Every
+upgrade with +/- buttons, every gun, and a God Mode switch; whatever you sign there sticks for the run.
+
+**Playtests:** `node tools/playtest.mjs <outDir> <scenario>` boots the game in headless Edge or Chrome and drives a
+scripted session (screenshots plus a log). Scenarios include `full`, `boss`, `ceo`, `ceomoves`, `hatchet`, `phase`,
+`dashperks`, `livewater`, `hrboss`, `memo`, `minis`, `cheats`, `fire` and `combat`.
 
 ## Credits
 

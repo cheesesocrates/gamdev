@@ -6,6 +6,168 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 
 ## Unreleased
 
+### Playtest feedback batch (branch `run-overhaul-feedback`)
+- Fix (World): the Middle Manager (the one who throws three memos) and the Consultant boss showed up as missing
+  textures. Their sprites are loaded again; the preload list is now built from the coworker table, so a coworker can't
+  lose its art like that again.
+- Fix (World): power strips lie flat on the floor. They used to be depth-sorted like desks, so walking just above
+  one drew it on top of you and it looked like it was floating.
+- World: new art for the kicked-over water cooler (lying on its side with the water gushing out). It is hand-drawn,
+  so `tools/render-assets.mjs render` now leaves it alone (`handDrawn` in the spec), and the sprite is re-anchored
+  when it swaps in.
+- UI: a bought upgrade clipboard is stamped **APPROVED** (not "HIRED"), its price tag disappears and the whole card
+  greys out, so it no longer looks like something you can buy again. A bought gun slip loses its price tag too. An
+  offer you already have every stack of shows as MAXED.
+- Fix (UI): the FIRED x / y bar sometimes stayed one short (e.g. 9 / 10 under "QUOTA MET"): the last firing ended the
+  day before the HUD caught up. It now updates on every firing and at the end of the day. When the quota is met but
+  the boss is still standing, it says "QUOTA MET: FIRE THE BOSS" instead of looking finished.
+- Fix (Gameplay): the Cold Caller's PA line said "Do not pick up the phones", which sounded like something to avoid
+  doing. It now says what actually happens: ringing phones blow up, so keep clear of the red rings. A one-time tip
+  explains it when the first phone lands (and that a keyboard swing sends one back).
+- Fix (UI): more dead space past the office's outer walls. In a corner the camera used to stop at the edge of the map,
+  so you ended up hidden under the HUD (the to-do note, hearts or minimap); now it can keep scrolling and you stay in
+  the open part of the screen.
+- UI: the end-of-day internal memo is two short lines instead of four bullet points that all started with "Due to
+  budget cuts". The first is the headline, written once: "**Due to budget cuts:** the Hatchet Man makes the cuts
+  himself." (the single biggest change for tomorrow: a boss, a new kind of coworker, or the chore load). The second has
+  everything else you need for tomorrow: "Tomorrow: Vacations are cancelled (expect burnouts) · 5 chores (one more) ·
+  +4s on the clock · quota 22." (a second new coworker type if there is one, how many chores and whether there's one
+  more or they're longer, extra Crunch Time, the quota). It never says the same thing twice. The PA reads the headline.
+- Gameplay: HR Directors who slip in a puddle keep their riot shield in hand and spin round with it, instead of the
+  shield fading away. Zapped in a live puddle, they spin too. (The shield still can't block while they're down; a
+  keyboard bonk still knocks it aside.)
+- Gameplay: desks, tables, boxes and potted plants only hurt coworkers when **you** sent them flying into them (a
+  shove or a dodge-roll), and only the coworkers they're actually travelling into. A coworker walking into the side of
+  a sliding desk, or a desk the Hatchet Man knocked loose, doesn't hurt anyone; a pot only throws shrapnel if you threw
+  it. Office chairs follow the same rule: a chair a coworker bumped into no longer bowls coworkers over.
+- Fix (Gameplay): no coworker spawns inside the code-locked room any more. The Marketing Lounge has a fire exit, and
+  on days it was locked, coworkers came in through it and got stuck behind the door (you couldn't reach them, so the
+  quota could never be met). Locked-room spawn points are skipped, nobody sits or wanders in there before 5 PM, and
+  the Consultant's interns can't appear in there either. Safety net: a coworker with no way to reach you for a few
+  seconds comes back in through an entrance.
+- Fix: a coworker killed by a live puddle no longer keeps updating for the rest of that frame (it could leave a
+  stray flame sprite behind).
+- Fix (World): the golden briefcase behind the code-locked door is put down on clear floor near the middle of the
+  room, where no furniture is drawn over it. In the Marketing Lounge the middle of the room is under the coffee table,
+  so the briefcase used to be drawn underneath it. Checked in all three lockable rooms (Marketing Lounge, Supply
+  Closet, Restrooms).
+- Gameplay: AI robots that walk into a puddle short out: they freeze, spark and rattle for about a second
+  ("SHORT CIRCUIT!"), then blow up. The blast hurts the coworkers around them (never you, like every trap), cracks glass
+  but leaves the walls standing, and counts as a trap kill. Finish one off while it's frying and it still goes bang.
+- Gameplay: coworkers can't stand inside each other or inside you any more. They push each other apart (bosses and
+  riot shields stand their ground), step out of your way, and are never shoved into a wall or a desk. A charging boss
+  still ploughs through people, and a dodge-roll still slips through a crowd.
+- Gameplay: new upgrade **Open-Plan Office** (epic): your dodge becomes a quick, shorter dash (about 115 px instead
+  of the roll's 150) that phases straight through interior walls (drywall, concrete, glass) and desks, with a trail of
+  ghostly after-images. The whole path is checked before you move, so it can't go wrong: it stops at the building's
+  outer walls, at the code-locked door and at the edge of the locked room (you can't phase in there), and it never
+  ends inside a wall or a desk: it carries on to come out the far side or stops at the last open spot. You see from
+  the open floor while you're inside a wall, and a dash that's still going when the day's crunch ends is landed
+  first. Tested with 4,000 random dashes all over the office.
+- Gameplay: **a run is nine days.** Day 3 and day 6 each get a boss drawn at random from the Hatchet Man, the Cold
+  Caller and the Consultant (never the same one twice), and day 9 is the finale against **the CEO**. The day banner
+  says "DAY 3 / 9". Tomorrow's memo always names the right boss.
+- Gameplay: **the CEO** (day 9) is the grand finish. He comes down in the lift and, the first time only, gets an
+  entrance: the floor freezes, letterbox bars slide in, the camera cuts to him and he trash-talks you ("So. You're the
+  one costing me multiple employees.") before the fight (click / Space to go on, Esc or SKIP to skip). Three phases, each
+  of which has to be fought (damage stops at the next phase's line until he moves on, with a speech and a shockwave
+  in between): **Quarterly Review** (fans of gold coins; golden-parachute leaps that land where a red ring marks the
+  floor), **Restructuring** (two HR Directors called up as security, double coin fans, landings that scatter coins)
+  and **Liquidation** (burning budget reports lobbed at you, the office set on fire, faster everything). He arrives
+  at 25% of the quota instead of 40%, and the day's quota is smaller so he's the main event. His defeat gets a
+  golden-confetti send-off.
+- Gameplay: the Consultant has his own tricks now instead of a copy of the Hatchet Man's charge: his interns shield
+  him (**synergy**: gold tethers, and he takes a quarter damage while any of them are close, so fire them first), and
+  below half health he spins up and **pivots**: a full ring of memos.
+- Gameplay: **after day 9**: a Letter of Promotion, then a choice: **CASH OUT** (back to the title, the run counts as
+  complete) or **KEEP WORKING (ENDLESS)**. In endless a boss still turns up every third day (from the same three) and
+  the CEO every ninth day (18, 27, ...), with no cutscene, and every nine days bosses get 30% more health, a little
+  faster and attack more often. The quota keeps climbing, more gently than during the run. The title screen's best
+  shows "RUN COMPLETE" (plus endless days) once you've finished a run.
+- Fix (Gameplay): a boss day could end without the boss if the quota was met before he'd stepped out of the lift.
+  The day now waits for the boss to turn up and be fired.
+- Fix (UI): every boss was announced as "THE CONSULTANT HAS BEEN LET GO" when fired; it now uses the boss's name.
+- World: **fire looks like fire.** The cartoon flames are gone. Burning tiles are real blazes built from Kenney's
+  Smoke Particles fire frames: turbulent fire puffs that rise, swell and redden, a white-hot core, flame tongues
+  licking up, embers, and smoke rolling off the top of a big fire (lit orange from below). Burning paper glows, then
+  chars black. Burning coworkers carry a small blaze of their own (and no longer strobe white on every burn tick), and
+  big explosions throw out a fireball. Everything is pooled, so a floor full of fire stays cheap.
+- Chores: **Reset the Wi-Fi** is no longer a memory game (the light sequences kept getting longer). Now you aim the
+  router's antennas (drag sideways, or hold A / D) to find the signal and hold full bars until it connects. The sweet
+  spot drifts, and every few seconds office interference ("Someone microwaved fish!") knocks it somewhere new, with a
+  burst of static first. Losing the signal for too long costs a second. Later days only make it longer, not harder.
+- Chores: **Shred the Evidence** is a drag now: pull each document down into the slot at a steady speed. A gauge
+  shows TOO SLOW / JUST RIGHT / TOO FAST: too fast jams it (the page backs out and costs a second), holding it too
+  slowly stalls it (same). Letting go never costs anything.
+- UI: **cheat sheet** for debugging. On the Performance Review, type the Konami code (up up down down left right left
+  right B A) and a "CONFIDENTIAL" sheet opens: every upgrade with its logo, rarity and description and +/- buttons
+  (rarity / chore / owned filters and a search box), every gun with an Owned box, and a God Mode switch. Whatever you
+  sign there sticks for the rest of the run. Esc, CLOSE or a click outside closes it; typing in it never reaches the
+  game (no accidental mute). Guns you already own can't be bought again, and maxed offers show as MAXED.
+- Fix (Gameplay): coworkers' melee reach against another coworker (a Blame Game scapegoat, an ally) now measures
+  from that coworker's edge, so a big one standing right there can be hit.
+- Balance: **Electric Personality** (every puddle is live) is epic now instead of rare, so it turns up less often, and
+  it only lasts for your next **2 fights**; then it wears off ("Electric Personality has worn off" when the second
+  day is cleared) and can turn up again later. The cheat sheet tags it "2 fights".
+- Balance: **Open-Plan Office** is epic now (it was rare) and costs 28. Phasing through a **wall** has a 1.2 s
+  cooldown (Agile Methodology shortens it like the dodge). A dash on cooldown still phases through desks but stops at
+  the wall. A small WALL light next to the dodge pips shows when the next one can go through walls. The description
+  says so.
+- Gameplay: Open-Plan Office works with every other dodge upgrade. Cubicle Ninja, Wet Floor Sign, Burnout Culture,
+  Paper Trail, Hot Desking and Office Romance all trigger on a phase dash, and the dash is fast enough to skip
+  past things in one frame, so Ninja and the trails sweep the whole stretch it crossed (trails only land on open
+  floor, never inside a wall). **Desk Jockey** is locked while you have it (a phase dash goes through desks instead
+  of shoving them): it isn't offered any more, and if it was on the table when you bought Open-Plan Office, its
+  clipboard is stamped LOCKED with a padlock. The cheat sheet shows a padlock tag on it ("locked by Open-Plan
+  Office").
+- Gameplay: **live puddles hurt over time** instead of killing on the spot. Standing in one does about 26 damage a
+  second (more with Hazard Pay), slows you to a wade and gives a jolt (a short stun) every 1.6 s, so a coworker who
+  gets out quickly survives. AI robots still short out and blow up. A **boss** stuck in live water for 3 seconds
+  gets **INSULATED** for 4 seconds (no damage, no stun) so he can walk out of it.
+- Fix (UI): the Konami code on the Performance Review is matched by the key you type as well as its position on the
+  keyboard, so it works on any keyboard layout and with the number-pad arrows.
+- Balance: later days are a little easier on chores and time. At most 6 chores a day (was 7), each chore grows about
+  20% less per level and stops growing after 6 levels, and from day 4 you get **+4 s of Crunch Time a day** (up to +20 s
+  by day 8). The day banner and the memo only say "chores take longer" on days they really do.
+- Gameplay: **the CEO borrows every other boss's moves**, so the finale is bigger than any fight before it:
+  - **Hostile Takeover** (all phases): the Hatchet Man's charge (stomp, red lane, lock on), faster, and nothing
+    inside the building stops it. He smashes through drywall, glass and **concrete** (the Server Core included),
+    furniture and server racks, and bowls coworkers over. Only the building's outer walls, the code-locked room and
+    heavy machines stop him: then it's BONK and he's dizzy for 1.6 s (free hits). He can come at you through a wall
+    when he can't see you, if you're close. Bigger shake and a hit-stop on impact.
+  - **Conference Call** (from phase 2): the Cold Caller's ring of ringing desk phones around you (5, then 7 in
+    phase 3).
+  - **Pivot** (phase 3): the Consultant's spin, a full ring of 20 gold coins and memos.
+  - **Liquidation** charges come in pairs: when a charge ends without a BONK he skids, turns round and charges again
+    on a short wind-up.
+  - Liquidation also cuts the sprinkler budget ("The sprinkler budget has been liquidated. Please continue
+    working."): no sprinklers while he's in phase 3, and the music speeds up.
+  - The phase-change speech cuts short whatever he was doing, and his moves are spaced out so two never start at once.
+- Story: the CEO's first line is "So. You're the one costing me multiple employees." (was "five salaries").
+- Fix (UI): the PA caption ("The CEO is on his way down to the floor.") no longer sits on top of the CEO's
+  cutscene lines; it stops when the cutscene starts.
+- World: holes smashed in the concrete are repaired overnight like drywall and glass, and a PA speaker on a wall that
+  gets knocked down falls off (sparks) until the overnight repairs.
+- Audio: the fight music is a little quieter (about 17% lower).
+- Chores: **Reset the Wi-Fi** has no interference any more (no static, no "Someone microwaved fish!", no jumps). The
+  sweet spot sweeps smoothly left and right by itself: find it by the bars, then keep the antennas on it until it
+  connects. Later days make the sweep a little quicker (no quicker after day 3) and the connection longer. Losing the
+  signal for too long once it's connecting still costs a second.
+- Chores: the Wi-Fi chore starts with a one-second **GET READY** (the instructions are up, a bar runs down, then
+  "GO!"). The signal doesn't move and the antennas can't be dragged until then; a key you're already holding works
+  the moment it starts. (Mini-games can opt in to this with `ready` in their theme.)
+- Gameplay: new boss, **the Head of HR**, joins the day-3 / day-6 pool (four bosses now). He carries a riot shield
+  the size of a door that blocks shots from the front, and he turns slowly, so get round the side, bounce shots off a
+  wall, bonk the shield aside with the keyboard, or use fire, traps and explosions (bosses don't slip). His megaphone
+  fires a cone of five stunning blasts the way he's facing. **Mandatory Training** calls in an HR Director and
+  interns. **Disciplinary Action** is a short shield-bash lunge the way the shield points (a short red lane first); it
+  shoves furniture but walls and glass don't give, so if he bashes into one it's THUD: stunned for 1.4 s with his
+  guard down. Below half health, **Zero Tolerance**: a full ring of twelve megaphone blasts. His own memo line, PA
+  announcement and tips.
+- Gameplay: **boss variety between runs.** A run's day-3 boss is never one of the last two pool bosses you met
+  (remembered across runs in the browser), and day 6 is any of the other three. Before, the day-3 boss was a plain
+  random pick, so the same one could open several runs in a row.
+
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.
 - Wall-mounted PA speakers in every room. Management's messages play through them with a chime and a crackle; the

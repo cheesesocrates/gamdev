@@ -1,5 +1,6 @@
 import { EnemyType } from "./enemies";
 import { shuffle } from "../util/math";
+import { GameState, RUN_DAYS } from "../systems/GameState";
 
 export type ChoreId = "emails" | "print" | "shred" | "coffee" | "presentation" | "memos" | "server" | "plant" | "jam" | "wifi" | "mail" | "board";
 
@@ -31,19 +32,30 @@ export interface DayConfig {
   chores: ChoreId[];
   /** How much longer each chore's mini-game runs (0 = baseline). */
   lengthLevel: number;
+  /** Seconds added to Crunch Time today. */
+  extraTime: number;
   /** What got harder today compared to yesterday. */
   growth: "more" | "longer" | null;
   boss: boolean;
-  /** Which boss turns up on a boss day. */
+  /** Which boss turns up on a boss day (see GameState.bossFor). */
   bossType: EnemyType;
+  /** The last day of the run: the CEO's day. */
+  final: boolean;
+  /** Bosses keep up with you in endless: every nine days they get tougher (health, speed, attack rate). */
+  bossHp: number;
+  bossSpeed: number;
+  /** Multiplies boss cooldowns (below 1 = attacks more often). */
+  bossRate: number;
 }
 
-/** A boss every third day: the Hatchet Man, then the Cold Caller, then the Consultant, and round again. */
-const BOSS_ROTATION: EnemyType[] = ["hatchet", "caller", "consultant"];
-
 const CHORE_ORDER: ChoreId[] = ["emails", "print", "shred", "coffee", "presentation", "memos", "server", "plant", "jam", "wifi", "mail", "board"];
-/** Twelve chores to draw from, but never more than seven on one day's list. */
-const MAX_CHORES = 7;
+/** Twelve chores to draw from, but never more than six on one day's list. */
+const MAX_CHORES = 6;
+
+/** How much longer each chore's mini-game runs at a length level (it stops growing at level 6). */
+export const choreLength = (level: number) => 1 + Math.min(level, 6) * 0.28;
+/** Extra Crunch Time on later days: +4 s a day from day 4, at most +20 s. */
+export const extraCrunch = (day: number) => Math.min(20, Math.max(0, (day - 3) * 4));
 
 /**
  * Day 1 is three quick chores so the fight comes sooner. After that the load alternates between two knobs:
@@ -66,10 +78,18 @@ function rollChores(count: number, prev?: ChoreId[]): ChoreId[] {
 
 export function dayConfig(day: number, prevChores?: ChoreId[]): DayConfig {
   const d = day - 1;
-  const quota = 10 + d * 4 + Math.max(0, d - 5) * 2;
+  // The quota climbs through the run, then more gently in endless.
+  const q = (n: number) => 10 + n * 4 + Math.max(0, n - 5) * 2;
+  const boss = day % 3 === 0;
+  // On other days this is the next boss coming up (the plan is fixed per run, so it's the same one that shows).
+  const bossType = GameState.bossFor(Math.ceil(day / 3) * 3);
+  let quota = d < RUN_DAYS ? q(d) : q(RUN_DAYS - 1) + (d - (RUN_DAYS - 1)) * 3;
+  // The CEO is the main event: fewer coworkers to fire that day.
+  if (boss && bossType === "ceo") quota = Math.round(quota * 0.6);
+  const tier = Math.floor(d / RUN_DAYS);
   const load = choreLoad(day);
   const prevLoad = choreLoad(day - 1);
-  const growth = day <= 1 ? null : load.count > prevLoad.count ? "more" : "longer";
+  const growth = day <= 1 ? null : load.count > prevLoad.count ? "more" : choreLength(load.lengthLevel) > choreLength(prevLoad.lengthLevel) ? "longer" : null;
   const weights: Partial<Record<EnemyType, number>> = { intern: 60, accountant: 25 };
   if (day >= 2) Object.assign(weights, { intern: 40, fulltime: 25, accountant: 22, manager: 12, hr: 4 });
   if (day >= 3) Object.assign(weights, { intern: 30, fulltime: 26, accountant: 20, manager: 14, hr: 6, burnout: 12 });
@@ -87,8 +107,13 @@ export function dayConfig(day: number, prevChores?: ChoreId[]): DayConfig {
     speedMult: 1 + Math.min(0.25, d * 0.035),
     chores: rollChores(load.count, prevChores),
     lengthLevel: load.lengthLevel,
+    extraTime: extraCrunch(day),
     growth,
-    boss: day % 3 === 0,
-    bossType: BOSS_ROTATION[(Math.max(1, Math.floor(day / 3)) - 1) % BOSS_ROTATION.length]
+    boss,
+    bossType,
+    final: day === RUN_DAYS,
+    bossHp: 1 + tier * 0.3,
+    bossSpeed: 1 + Math.min(0.3, tier * 0.06),
+    bossRate: Math.max(0.6, 1 - tier * 0.12)
   };
 }

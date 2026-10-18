@@ -20,6 +20,11 @@
 .m-pop { font: 400 7cqw/1 var(--f-display); white-space: nowrap; pointer-events: none; z-index: 20; text-shadow: 0 4px 0 rgba(0, 0, 0, .45); }
 .m-done { inset: 0; display: grid; place-items: center; z-index: 25; pointer-events: none; background: rgba(255, 246, 224, .35); }
 .m-done span { padding: 1cqw 4cqw; font: 400 12cqw/1 var(--f-display); color: var(--c-green); background: #fff; border: 5px solid var(--c-ink); border-radius: 6px; box-shadow: 0 7px 0 var(--c-ink); }
+/* A second to read the instructions before the chore starts (the bar runs down). */
+.m-ready { inset: 0; display: grid; place-items: center; align-content: center; gap: 2.6cqw; z-index: 24; background: rgba(28, 29, 33, .38); }
+.m-ready span { padding: 1cqw 4cqw; font: 400 9cqw/1 var(--f-display); color: var(--c-ink); background: #fff; border: 5px solid var(--c-ink); border-radius: 6px; box-shadow: 0 7px 0 var(--c-ink); transform: rotate(-3deg); }
+.m-ready i { width: 30cqw; height: 2.4cqw; border: 3px solid var(--c-ink); border-radius: 999px; background: #fff; overflow: hidden; }
+.m-ready b { display: block; width: 100%; height: 100%; background: var(--accent); transform-origin: 0 50%; }
 
 .key { display: grid; place-items: center; min-width: 18cqw; height: 8cqw; padding: 0 2.4cqw; background: #fff; border: 3px solid var(--c-ink); border-radius: 4px; box-shadow: 0 6px 0 var(--c-ink); font: 400 4.1cqw/1 var(--f-display); letter-spacing: 1px; color: var(--c-ink); transition: transform .06s, box-shadow .06s; z-index: 5; pointer-events: none; }
 .key.down { transform: translateY(5px); box-shadow: 0 1px 0 var(--c-ink); background: var(--c-yellow); }
@@ -59,20 +64,41 @@
 .pr-key { right: 2.5%; top: 4%; }
 
 /* ---------------------------------------------------------------- shredder */
-.g-shred { background: #d5d9de; background-image: radial-gradient(rgba(91,99,128,.18) 2px, transparent 2px); background-size: 4% 7.4%; cursor: pointer; }
+.g-shred { background: #d5d9de; background-image: radial-gradient(rgba(91,99,128,.18) 2px, transparent 2px); background-size: 4% 7.4%; cursor: grab; }
+.g-shred.drag { cursor: grabbing; }
 .sh-clip { left: 32%; width: 36%; top: 0; height: 47%; overflow: hidden; z-index: 1; }
 .sh-doc { position: absolute; left: 10%; right: 10%; top: -20%; height: 128%; background: var(--c-paper); border: 3px solid var(--c-ink); border-radius: 6px; padding: 7% 10%; box-sizing: border-box; }
 .sh-doc b { display: block; width: fit-content; margin: 6% auto 10%; padding: .5cqw 1.6cqw; transform: rotate(-7deg); border: 3px solid var(--c-red); color: var(--c-red); border-radius: 6px; font: 400 3.1cqw/1.1 var(--f-display); text-align: center; white-space: nowrap; }
 .sh-doc i { display: block; height: 1.1cqw; margin: 1.6cqw 0; background: #d5d1e8; border-radius: 4px; }
-.sh-head { left: 20%; width: 60%; top: 42%; height: 19%; background: #3a3c44; border: 4px solid var(--c-ink); border-radius: 16px; z-index: 2; }
+.sh-head { left: 17%; width: 66%; top: 38%; height: 26%; background: #3a3c44; border: 4px solid var(--c-ink); border-radius: 16px; z-index: 2; }
 .sh-head > * { position: absolute; }
-.sh-slot { left: 16%; right: 16%; top: 18%; height: 17%; background: #0d0820; border-radius: 99px; box-shadow: inset 0 3px 0 #000; }
-.sh-label { left: 0; right: 0; bottom: 14%; text-align: center; color: var(--c-yellow); font: 400 2.9cqw/1 var(--f-display); letter-spacing: 1px; }
-.sh-bin { left: 25%; width: 50%; top: 59%; bottom: -4%; background: #4a4f5c; border: 4px solid var(--c-ink); border-radius: 0 0 14px 14px; z-index: 1; }
-.sh-window { position: absolute; left: 12%; right: 12%; top: 14%; bottom: 20%; background: rgba(205, 215, 222, .55); border: 3px solid var(--c-ink); border-radius: 10px; overflow: hidden; }
+.sh-head.run { animation: shRun .09s linear infinite; }
+.sh-head.jam { animation: shJam .11s linear infinite; }
+.sh-head.jam .sh-slot { background: #4a120c; box-shadow: inset 0 3px 0 #000, 0 0 1.6cqw #ff5a3a; }
+@keyframes shRun { 25% { transform: translate(.12cqw, .1cqw); } 75% { transform: translate(-.12cqw, 0); } }
+@keyframes shJam { 25% { transform: translate(.9cqw, .25cqw) rotate(.7deg); } 75% { transform: translate(-.9cqw, -.2cqw) rotate(-.7deg); } }
+.sh-slot { left: 14%; right: 14%; top: 10%; height: 12%; background: #0d0820; border-radius: 99px; box-shadow: inset 0 3px 0 #000; }
+.sh-label { left: 0; right: 0; top: 29%; text-align: center; color: var(--c-yellow); font: 400 2.6cqw/1 var(--f-display); letter-spacing: 1px; }
+/* Feed-speed gauge: three zones and a needle (its left is set from the speed). */
+.sh-gauge { left: 6%; right: 6%; top: 53%; height: 32%; background: #15161a; border: 3px solid var(--c-ink); border-radius: 1cqw; }
+.sh-gauge span { position: absolute; top: 0; bottom: 0; display: grid; place-items: center; color: rgba(255, 255, 255, .5); font: 400 2.3cqw/1 var(--f-display); letter-spacing: .5px; white-space: nowrap; transition: background-color .1s, color .1s; }
+.sh-gauge .z0 { left: 0; width: 30%; background: #2b4652; border-radius: .6cqw 0 0 .6cqw; }
+.sh-gauge .z1 { left: 30%; width: 40%; background: #24513a; box-shadow: inset 3px 0 0 var(--c-ink), inset -3px 0 0 var(--c-ink); }
+.sh-gauge .z2 { left: 70%; right: 0; background: #5a251f; border-radius: 0 .6cqw .6cqw 0; }
+.sh-gauge[data-z="0"] .z0 { background: #6aa3b4; color: #fff; }
+.sh-gauge[data-z="1"] .z1 { background: #4bb873; color: #fff; }
+.sh-gauge[data-z="2"] .z2 { background: #e0503f; color: #fff; }
+.sh-needle { position: absolute; left: 0; top: -34%; bottom: -34%; width: 1.1cqw; margin-left: -.55cqw; background: #fff; border: 2px solid var(--c-ink); border-radius: 99px; box-shadow: 0 2px 0 var(--c-ink); }
+.sh-bin { left: 25%; width: 50%; top: 62%; bottom: -4%; background: #4a4f5c; border: 4px solid var(--c-ink); border-radius: 0 0 14px 14px; z-index: 1; }
+.sh-window { position: absolute; left: 12%; right: 12%; top: 16%; bottom: 18%; background: rgba(205, 215, 222, .55); border: 3px solid var(--c-ink); border-radius: 10px; overflow: hidden; }
 .sh-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 8%; background: repeating-linear-gradient(90deg, #fff 0 6px, #e8e3ff 6px 9px, #fff4c4 9px 13px); border-top: 2px solid rgba(28,29,33,.3); transition: height .2s; }
 .sh-strip { position: absolute; width: 4px; height: 32%; border: 1px solid rgba(28,29,33,.45); border-radius: 2px; }
-.sh-key { right: 4%; bottom: 10%; }
+/* "Grab it here": bobs beside the page until the paper is in hand. */
+.sh-drag { left: 72%; top: 6%; display: grid; justify-items: center; gap: .8cqw; z-index: 3; pointer-events: none; transition: opacity .2s; animation: shBob .9s ease-in-out infinite; }
+.sh-drag.off { opacity: 0; }
+.sh-drag b { padding: .5cqw 1.6cqw; background: #fff; border: 3px solid var(--c-ink); border-radius: 999px; box-shadow: 0 3px 0 var(--c-ink); font: 400 2.9cqw/1 var(--f-display); letter-spacing: 1px; }
+.sh-drag svg { display: block; width: 5.6cqw; height: auto; filter: drop-shadow(0 3px 0 rgba(28, 29, 33, .25)); }
+@keyframes shBob { 50% { transform: translateY(1.4cqw); } }
 
 /* ---------------------------------------------------------------- coffee machine */
 .g-coffee { background-color: #fff1d6; background-image: linear-gradient(rgba(28,29,33,.08) 2px, transparent 2px), linear-gradient(90deg, rgba(28,29,33,.08) 2px, transparent 2px); background-size: 8.6% 16%; }
@@ -199,12 +225,24 @@
 .jm-btn.down { transform: translateY(.6cqw); box-shadow: 0 .2cqw 0 var(--c-ink); background: var(--c-yellow); }
 
 /* ---------------------------------------------------------------- reset the wi-fi */
-.g-wifi { background: radial-gradient(ellipse at 50% 30%, #2d3a44, #182027 75%); }
+.g-wifi { background: radial-gradient(ellipse at 36% 30%, #2d3a44, #182027 75%); cursor: ew-resize; }
 .wf-svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
-.wf-row { position: absolute; left: 8%; right: 8%; bottom: 9%; display: flex; justify-content: center; gap: 3cqw; }
-.wf-b { --c: #3fa35a; width: 15cqw; height: 15cqw; border: 3px solid #0e1216; border-radius: 50%; background: color-mix(in srgb, var(--c) 45%, #1b2228); box-shadow: 0 1cqw 0 #0e1216, inset 0 0 0 .8cqw rgba(255, 255, 255, .06); color: #fff; font: 400 4cqw/1 var(--f-display); cursor: pointer; transition: background .08s, box-shadow .08s, transform .06s; }
-.wf-b b { font-weight: 400; opacity: .7; }
-.wf-b.lit { background: var(--c); box-shadow: 0 1cqw 0 #0e1216, 0 0 4cqw var(--c); transform: translateY(.4cqw); }
+.wf-waves path { fill: none; stroke: #6fe08a; stroke-width: 4; stroke-linecap: round; animation: wfWave .9s ease-out infinite; }
+.wf-waves path + path { animation-delay: .22s; }
+@keyframes wfWave { 0%, 100% { opacity: .15; } 35% { opacity: 1; } }
+/* Signal meter: five bars whose fills are scaled from the signal; --sig colours them. */
+.wf-meter { --sig: #e0503f; left: 68.6%; top: 8%; width: 28.4%; height: 76%; box-sizing: border-box; padding: 2cqw 2cqw 2.4cqw; display: flex; flex-direction: column; gap: 1.8cqw; background: #0b1114; border: 3px solid var(--c-ink); border-radius: 1.6cqw; box-shadow: inset 0 0 0 .7cqw #1d2830, 0 .9cqw 0 var(--c-ink); overflow: hidden; }
+.wf-meter.mid { --sig: #e9c25a; }
+.wf-meter.strong { --sig: #6fe08a; }
+.wf-state { color: var(--sig); font: 400 3.6cqw/1 var(--f-display); letter-spacing: .3cqw; text-align: center; white-space: nowrap; text-shadow: 0 0 1.4cqw var(--sig); }
+.wf-bars { flex: 1; display: flex; align-items: flex-end; gap: 1.2cqw; }
+.wf-bars i { position: relative; flex: 1; background: #1d2830; border: 2px solid #2c3a44; border-radius: .6cqw; overflow: hidden; }
+.wf-bars i:nth-child(1) { height: 22%; }
+.wf-bars i:nth-child(2) { height: 41.5%; }
+.wf-bars i:nth-child(3) { height: 61%; }
+.wf-bars i:nth-child(4) { height: 80.5%; }
+.wf-bars i:nth-child(5) { height: 100%; }
+.wf-bars b { position: absolute; inset: 0; background: var(--sig); transform: scaleY(0); transform-origin: 50% 100%; }
 
 /* ---------------------------------------------------------------- sort the mail */
 .g-mail { background: #e8dcc6; }

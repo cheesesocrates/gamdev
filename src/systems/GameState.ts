@@ -1,6 +1,13 @@
 import { PERKS, PERK_BY_ID, PerkDef, RARITY_RANK, RARITY_WEIGHT, Rarity } from "../data/perks";
 import { CRUNCH_SECONDS } from "../config";
 import { WEAPONS, WeaponId } from "../data/weapons";
+import { BOSS_POOL, EnemyType } from "../data/enemies";
+
+/** The last two pool bosses you met (across runs), so the next run opens with someone else. */
+const RECENT_BOSSES_KEY = "hostile-takeover-recent-bosses";
+
+/** A run is nine days: bosses on days 3 and 6, the CEO on day 9. Then you can cash out, or keep going (endless). */
+export const RUN_DAYS = 9;
 
 const lockedArsenal = () => Object.fromEntries(WEAPONS.map((w) => [w, w === "stapler"])) as Record<WeaponId, boolean>;
 import { shuffle } from "../util/math";
@@ -71,6 +78,8 @@ export interface Stats {
   wetFloor: boolean;
   sticky: number;
   ninja: boolean;
+  /** Open-Plan Office: the dodge is a short dash that phases through walls. */
+  phaseDash: boolean;
   deskJockey: number;
   handshake: number;
   blame: boolean;
@@ -112,8 +121,23 @@ class GameStateClass {
   totalFired = 0;
   dayStats: DayStats = freshDayStats();
   stats: Stats = this.computeStats();
+  /** Past day 9: the run goes on for as long as you last. */
+  endless = false;
+  /** Fights left on upgrades that wear off (PerkDef.days). */
+  perkDays: Record<string, number> = {};
+  /** Which boss visits on which day this run (decided up front so tomorrow's memo always matches). */
+  private bossPlan = new Map<number, EnemyType>();
 
   reset() {
+    this.endless = false;
+    this.perkDays = {};
+    this.bossPlan = new Map();
+    // Day 3 is never one of the last two bosses you met; day 6 is any of the others.
+    const recent = this.recentBosses();
+    const fresh = BOSS_POOL.filter((t) => !recent.includes(t));
+    const first = shuffle([...(fresh.length ? fresh : BOSS_POOL)])[0];
+    this.bossPlan.set(3, first);
+    this.bossPlan.set(6, shuffle(BOSS_POOL.filter((t) => t !== first))[0]);
     this.day = 1;
     this.bank = 0;
     this.stacks = {};
@@ -130,6 +154,38 @@ class GameStateClass {
     // A good night's sleep heals half your missing health (rounded up).
     const missing = this.stats.maxHp - this.hp;
     this.hp = Math.min(this.stats.maxHp, this.hp + Math.ceil(missing / 2) + 2);
+  }
+
+  private recentBosses(): EnemyType[] {
+    try {
+      const v = JSON.parse(localStorage.getItem(RECENT_BOSSES_KEY) ?? "[]");
+      return Array.isArray(v) ? v.filter((t): t is EnemyType => BOSS_POOL.includes(t)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** A pool boss just turned up: remember him (the last two) for the next run's plan. */
+  noteBoss(type: EnemyType) {
+    if (!BOSS_POOL.includes(type)) return;
+    const recent = [...this.recentBosses().filter((t) => t !== type), type].slice(-2);
+    try { localStorage.setItem(RECENT_BOSSES_KEY, JSON.stringify(recent)); } catch { /* private window: no memory */ }
+  }
+
+  /**
+   * The boss on a boss day (every third day): the CEO on day 9 and every ninth day after; otherwise one of the
+   * pool, never the same as the boss before it.
+   */
+  bossFor(day: number): EnemyType {
+    if (day % 9 === 0) return "ceo";
+    let b = this.bossPlan.get(day);
+    if (!b) {
+      const prev = this.bossPlan.get(day - 3);
+      const pool = BOSS_POOL.filter((t) => t !== prev);
+      b = pool[Math.floor(Math.random() * pool.length)];
+      this.bossPlan.set(day, b);
+    }
+    return b;
   }
 
   crunchSeconds() {
@@ -149,6 +205,7 @@ class GameStateClass {
     const p = PERK_BY_ID[id];
     if (!p || !this.canTake(p)) return;
     this.stacks[id] = this.stack(id) + 1;
+    if (p.days) this.perkDays[id] = p.days;
     if (id === "parachute") this.revivesLeft = 1;
     const prevMax = this.stats.maxHp;
     this.stats = this.computeStats();
@@ -156,10 +213,47 @@ class GameStateClass {
     this.hp = Math.min(this.hp, this.stats.maxHp);
   }
 
-  /** Weapon upgrades stay hidden until the player owns that weapon. */
+  /** Takes one stack back off (the cheat sheet's minus button). */
+  removePerk(id: string) {
+    const n = this.stack(id);
+    if (n <= 0) return;
+    if (n > 1) this.stacks[id] = n - 1;
+    else { delete this.stacks[id]; delete this.perkDays[id]; }
+    if (id === "parachute" && n === 1) this.revivesLeft = 0;
+    const alive = this.hp >= 1;
+    this.stats = this.computeStats();
+    // Fewer hearts: clamp to the new max, but never all the way down to zero.
+    this.hp = Math.min(this.hp, this.stats.maxHp);
+    if (alive) this.hp = Math.max(1, this.hp);
+  }
+
+  /** A fight is over: timed upgrades tick down; the ones that run out come off. Returns their names. */
+  fightOver(): string[] {
+    const gone: string[] = [];
+    for (const id of Object.keys(this.perkDays)) {
+      if (--this.perkDays[id] > 0) continue;
+      delete this.perkDays[id];
+      while (this.stack(id) > 0) this.removePerk(id);
+      const p = PERK_BY_ID[id];
+      if (p) gone.push(p.name);
+    }
+    return gone;
+  }
+
+  /** The upgrade you own that locks this one out (Open-Plan Office bypasses dodge-roll shoves, so Desk Jockey...). */
+  lockedBy(p: PerkDef): PerkDef | null {
+    for (const id of Object.keys(this.stacks)) {
+      const o = PERK_BY_ID[id];
+      if (o && this.stack(id) > 0 && o.locks?.includes(p.id)) return o;
+    }
+    return null;
+  }
+
+  /** Weapon upgrades stay hidden until the player owns that weapon; locked-out upgrades never show. */
   available(p: PerkDef) {
     if (!this.canTake(p)) return false;
     if (p.requires && !this.unlocked[p.requires]) return false;
+    if (this.lockedBy(p)) return false;
     return true;
   }
 
@@ -263,6 +357,7 @@ class GameStateClass {
       wetFloor: s("wetfloor") > 0,
       sticky: s("sticky"),
       ninja: s("ninja") > 0,
+      phaseDash: s("phasedash") > 0,
       deskJockey: s("deskjockey"),
       handshake: s("handshake"),
       blame: s("blame") > 0,

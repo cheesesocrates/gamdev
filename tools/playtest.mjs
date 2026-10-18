@@ -284,9 +284,579 @@ try {
     console.log("hatchet states seen:", [...seen].join(", "));
     console.log("memo lines:");
     for (let d = 1; d <= 9; d++) {
-      const lines = await ev((day) => { const h = window.__HT; return h.scene.memoLines(h.dayConfig(day), h.dayConfig(day + 1)); }, d);
-      console.log(d, "->", d + 1, JSON.stringify(lines));
+      const m = await ev((day) => { const h = window.__HT; return h.scene.memoLines(h.dayConfig(day), h.dayConfig(day + 1)); }, d);
+      console.log(d, "->", d + 1, `Due to budget cuts: ${m.headline}. | Tomorrow: ${m.details}.`);
     }
+  }
+
+  // The code-locked room: nobody spawns in it (the Marketing Lounge has a fire exit), and a coworker stuck in it gets out.
+  if (scenario === "locked") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    const room = await ev(() => {
+      const s = window.__HT.scene, v = s.vault;
+      for (let k = 0; k < 60 && v.room.name !== "Marketing Lounge"; k++) v.setupDay(s.dayCfg.chores);
+      window.__HT.god(true);
+      return v.room.name;
+    });
+    console.log("locked room:", room);
+    await ev(() => window.__HT.toFight());
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    const lounge = await ev(() => {
+      const s = window.__HT.scene;
+      s.quota = 999;
+      s.dayCfg.maxAlive = 40;
+      s.dayCfg.spawnEvery = 0.3;
+      // Park the player next to the lounge so its fire exit would be the favourite spawn.
+      const p = s.world.nearestWalkable(58.5 * 64, 14 * 64);
+      s.player.x = p.x; s.player.y = p.y;
+      // Somebody already stuck inside (as if they'd spawned there before the fix).
+      const e = s.spawnEnemy("intern", 59 * 64, 5 * 64, "hostile");
+      e.spawnGrace = 0;
+      window.__stuck = e;
+      return s.vault.lockedZone;
+    });
+    let inside = 0, maxInside = 0;
+    for (let i = 0; i < 40; i++) {
+      await sleep(250);
+      inside = await ev((z) => { const s = window.__HT.scene; return s.enemies.filter((e) => e !== window.__stuck && !e.dead && s.zoneAt(e.x, e.y) === z).length; }, lounge);
+      maxInside = Math.max(maxInside, inside);
+    }
+    const stuck = await ev((z) => { const s = window.__HT.scene, e = window.__stuck; return { dead: e.dead, stillInside: s.zoneAt(e.x, e.y) === z, x: Math.round(e.x), y: Math.round(e.y) }; }, lounge);
+    console.log("spawned inside the locked room (max seen):", maxInside, "| stuck coworker:", JSON.stringify(stuck), "| enemies:", await ev(() => window.__HT.scene.enemies.length));
+    await shot("l01-locked");
+  }
+
+  // The finale: day 9's CEO (cutscene, three phases, a leap), the end of the run, endless, and a cutscene-free day-18 CEO.
+  if (scenario === "ceo") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    const plan = await ev(() => { const h = window.__HT; return [3, 6, 9, 12, 15, 18, 21, 27].map((d) => `${d}:${h.dayConfig(d).bossType}`).join(" "); });
+    console.log("boss plan", plan);
+    await ev(() => { const h = window.__HT; h.god(true); h.day(9); });
+    await sleep(700);
+    await ev(() => window.__HT.toFight());
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(900);
+    console.log("day 9", JSON.stringify(await ev(() => { const s = window.__HT.scene; return { quota: s.quota, final: s.dayCfg.final, boss: s.dayCfg.bossType }; })));
+    await ev(() => window.__HT.boss());
+    for (let k = 0; k < 200 && (await ev(() => window.__HT.scene.phase)) !== "cutscene"; k++) await sleep(250);
+    console.log("phase after the CEO arrives:", await ev(() => window.__HT.scene.phase));
+    await sleep(1600);
+    await shot("ceo01-cutscene");
+    for (let k = 0; k < 4; k++) { await page.keyboard.press("Space"); await sleep(250); await page.keyboard.press("Space"); await sleep(500); }
+    await sleep(600);
+    console.log("after the cutscene:", await ev(() => window.__HT.scene.phase));
+    const boss = () => ev(() => { const s = window.__HT.scene, b = s.waves.boss; return b ? { phase: b.ceoPhase, hp: Math.round(b.hp), max: Math.round(b.maxHp), dead: b.dead, imm: b.immune, air: b.airborne } : null; });
+    await ev(() => { const s = window.__HT.scene, b = s.waves.boss; const p = s.world.nearestWalkable(b.x, b.y + 260); s.player.x = p.x; s.player.y = p.y; });
+    await sleep(1500);
+    await shot("ceo02-phase1");
+    // A big hit can't skip a phase: the damage stops at the 66% line.
+    await ev(() => { const s = window.__HT.scene, b = s.waves.boss; s.hitEnemy(b, b.maxHp, { angle: 0, kind: "staple", x: b.x, y: b.y, knock: 0 }); });
+    console.log("after a huge hit in phase 1:", JSON.stringify(await boss()));
+    await sleep(2600);
+    console.log("phase 2:", JSON.stringify(await boss()), "hr on the floor:", await ev(() => window.__HT.scene.enemies.filter((e) => e.type === "hr").length));
+    await shot("ceo03-phase2");
+    // Wait out the phase-change speech, then make him leap.
+    for (let k = 0; k < 80 && (await boss()).imm; k++) await sleep(200);
+    await ev(() => { const s = window.__HT.scene, b = s.waves.boss; const p = s.world.nearestWalkable(b.x, b.y + 200); s.player.x = p.x; s.player.y = p.y; b.leapCd = 0; });
+    let air = false;
+    for (let k = 0; k < 60 && !air; k++) { air = (await boss()).air; if (!air) await sleep(100); }
+    console.log("leaping:", JSON.stringify(await boss()));
+    await shot("ceo04-leap");
+    await sleep(1500);
+    await ev(() => { const s = window.__HT.scene, b = s.waves.boss; s.hitEnemy(b, b.maxHp, { angle: 0, kind: "staple", x: b.x, y: b.y, knock: 0 }); });
+    await sleep(2800);
+    console.log("phase 3:", JSON.stringify(await boss()), "burning tiles:", await ev(() => window.__HT.scene.hazards.burningCount));
+    await shot("ceo05-phase3");
+    await sleep(2500);
+    await shot("ceo06-phase3-later");
+    await ev(() => { const s = window.__HT.scene, b = s.waves.boss; for (let k = 0; k < 40 && !b.dead; k++) s.hitEnemy(b, b.maxHp * 0.1, { angle: 0, kind: "staple", x: b.x, y: b.y, knock: 0 }); });
+    await sleep(800);
+    await shot("ceo07-defeated");
+    for (let k = 0; k < 40; k++) {
+      if ((await ev(() => window.__HT.scene.phase)) !== "downsizing") break;
+      await ev(() => window.__HT.killAll());
+      await sleep(400);
+    }
+    // (Headless frames are slow: wait for things rather than for a fixed time.)
+    await page.waitForFunction(() => document.querySelector("#results:not(.guard) .card"), { timeout: 60000 });
+    await ev(() => document.querySelector("#results .card").click());
+    await page.waitForFunction(() => document.querySelector("#runend:not(.guard) #reEndless"), { timeout: 60000 });
+    console.log("after day 9's pick:", await ev(() => window.__HT.scene.phase));
+    await sleep(900);
+    await shot("ceo08-run-end");
+    await ev(() => document.querySelector("#reEndless").click());
+    await page.waitForFunction(() => document.querySelector("#memo:not(.guard) #mgo"), { timeout: 60000 });
+    await sleep(1200);
+    await shot("ceo09-memo-day10");
+    await ev(() => document.querySelector("#mgo").click());
+    await sleep(1500);
+    console.log("endless:", JSON.stringify(await ev(() => ({ endless: window.__HT.state.endless, day: window.__HT.state.day, phase: window.__HT.scene.phase }))));
+    // Endless CEO on day 18: no cutscene.
+    await ev(() => { const h = window.__HT; h.day(18); });
+    await sleep(700);
+    await ev(() => window.__HT.toFight());
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(900);
+    await ev(() => window.__HT.boss());
+    let sawCut = false;
+    for (let k = 0; k < 160 && !(await ev(() => !!window.__HT.scene.waves.boss)); k++) { if ((await ev(() => window.__HT.scene.phase)) === "cutscene") sawCut = true; await sleep(250); }
+    for (let k = 0; k < 12; k++) { if ((await ev(() => window.__HT.scene.phase)) === "cutscene") sawCut = true; await sleep(250); }
+    console.log("day 18:", JSON.stringify({ sawCutscene: sawCut, boss: await boss(), phase: await ev(() => window.__HT.scene.phase), bossHp: await ev(() => Math.round(window.__HT.scene.waves.boss?.maxHp ?? 0)) }));
+    await shot("ceo10-day18");
+  }
+
+  // Open-Plan Office: the dodge is a short dash through walls. Never out of the building, never into the locked room or furniture.
+  if (scenario === "phase") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    await ev(() => {
+      const h = window.__HT, s = h.scene, v = s.vault;
+      for (let k = 0; k < 60 && v.room.name !== "Marketing Lounge"; k++) v.setupDay(s.dayCfg.chores);
+      h.give("phasedash", 1);
+      h.god(true);
+    });
+    // Real dashes through the player code: stand somewhere, face a way, press Space.
+    const T = 64;
+    const cases = [
+      { name: "drywall north into the Executive Suite", x: 5.5 * T, y: 13.3 * T, key: "KeyW" },
+      { name: "concrete east into the Server Core", x: 23.6 * T, y: 24.5 * T, key: "KeyD" },
+      { name: "the locked lounge door", x: 58.5 * T, y: 13.3 * T, key: "KeyW" },
+      { name: "the locked lounge wall", x: 56.5 * T, y: 13.3 * T, key: "KeyW" },
+      { name: "the outer wall", x: 7 * T, y: 1.35 * T, key: "KeyW" },
+      { name: "past a break table (west wing)", x: 11 * T, y: 26.5 * T, key: "KeyD" },
+      { name: "through a desk pod (west wing)", x: 3.0 * T, y: 20.5 * T, key: "KeyW" },
+      // Starting inside a desk (can't happen in play, but the dash must still never throw you across the map).
+      { name: "from inside a desk toward the locked lounge", x: 0, y: 0, key: "KeyW", inDesk: true }
+    ];
+    for (const c of cases) {
+      const start = await ev((cc) => {
+        const s = window.__HT.scene;
+        const q = { x: cc.x, y: cc.y };
+        if (cc.inDesk) {
+          const d = s.props.list.find((p) => p.f.key.startsWith("ws_") && p.f.y < 20 * 64 && p.f.x > 44 * 64);
+          q.x = d.f.x; q.y = d.f.y;
+        } else s.world.resolveCircle(q, s.player.r);
+        s.player.x = q.x; s.player.y = q.y; s.player.vx = s.player.vy = 0;
+        return q;
+      }, c);
+      c.x = start.x; c.y = start.y;
+      // Each case gets a fresh wall-phase (no cooldown left over from the last one) and a dodge charge.
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => ((p.wallReady && p.dodgeCharges > 0) || Date.now() - t0 > 6000 ? res() : setTimeout(f, 30)); f(); }));
+      // Aim the dash with the key (held until the dash has started), then let go: what's measured is where the dash alone put you.
+      await page.keyboard.down(c.key);
+      await sleep(60);
+      await page.keyboard.down("Space");
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => (p.rolling > 0 || Date.now() - t0 > 3000 ? res() : setTimeout(f, 10)); f(); }));
+      await page.keyboard.up("Space");
+      await page.keyboard.up(c.key);
+      if (c.name.startsWith("drywall")) await shot("ph01-mid-dash");
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => ((p.rolling <= 0 && !p.phasing) || Date.now() - t0 > 3000 ? res() : setTimeout(f, 20)); f(); }));
+      await sleep(80);
+      const r = await ev((cc) => {
+        const s = window.__HT.scene, p = s.player, w = s.world;
+        const z = s.zoneAt(p.x, p.y);
+        return { name: cc.name, from: [Math.round(cc.x), Math.round(cc.y)], to: [Math.round(p.x), Math.round(p.y)], moved: Math.round(Math.hypot(p.x - cc.x, p.y - cc.y)), zone: z >= 0 ? s.map.zones[z].name : "(wall!)", free: w.circleFree(p.x, p.y, p.r - 1), locked: s.inLockedRoom(p.x, p.y) };
+      }, c);
+      console.log("dash", JSON.stringify(r));
+    }
+    await shot("ph02-after");
+    // Fuzz: thousands of dashes from random open spots in random directions.
+    const fuzz = await ev(() => {
+      const s = window.__HT.scene, w = s.world, r = s.player.r;
+      let n = 0, bad = [], walls = 0, maxD = 0;
+      for (let k = 0; k < 4000; k++) {
+        const x = 64 + Math.random() * (64 * 62), y = 64 + Math.random() * (64 * 44);
+        if (!w.circleFree(x, y, r) || s.inLockedRoom(x, y)) continue;
+        const a = Math.random() * Math.PI * 2;
+        const e = s.phasePath(x, y, Math.cos(a), Math.sin(a), r, 115, 80);
+        n++;
+        const d = Math.hypot(e.x - x, e.y - y);
+        maxD = Math.max(maxD, d);
+        const tx = Math.floor(e.x / 64), ty = Math.floor(e.y / 64);
+        const ok = w.circleFree(e.x, e.y, r) && !s.inLockedRoom(e.x, e.y) && tx >= 1 && ty >= 1 && tx <= 62 && ty <= 44 && d <= 195.5;
+        // Crossed a wall? (sampled straight line from start to end touches a non-floor tile)
+        for (let t = 0; t <= 1; t += 0.05) if (!w.isFloorAt(x + (e.x - x) * t, y + (e.y - y) * t)) { walls++; break; }
+        if (!ok && bad.length < 5) bad.push({ x: Math.round(x), y: Math.round(y), a: +a.toFixed(2), ex: Math.round(e.x), ey: Math.round(e.y) });
+      }
+      return { dashes: n, throughWalls: walls, maxDist: Math.round(maxD), bad };
+    });
+    console.log("phase fuzz", JSON.stringify(fuzz));
+  }
+
+  // AI robots in a puddle: they short out, then blow up (hurting coworkers around them, never you).
+  if (scenario === "robots") {
+    await ev(() => { window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    const before = await ev(() => {
+      const s = window.__HT.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      const p = s.world.nearestWalkable(10 * 64, 19 * 64);
+      s.player.x = p.x; s.player.y = p.y + 140;
+      const r = s.spawnEnemy("robot", p.x, p.y, "hostile");
+      r.spawnGrace = 99;
+      const n = s.spawnEnemy("intern", p.x + 50, p.y, "hostile");
+      n.spawnGrace = 99;
+      window.__bot = r; window.__mate = n;
+      s.hazards.flood(p.x, p.y, 6, 0.01);
+      return { hp: window.__HT.state.hp, mate: Math.round(n.hp) };
+    });
+    await sleep(500);
+    await shot("r01-shorting");
+    const mid = await ev(() => ({ shortT: +window.__bot.shortT.toFixed(2), dead: window.__bot.dead }));
+    await sleep(1400);
+    await shot("r02-boom");
+    const after = await ev(() => ({ botDead: window.__bot.dead, mateHp: Math.round(window.__mate.hp), mateDead: window.__mate.dead, hp: window.__HT.state.hp, fired: window.__HT.scene.fired }));
+    console.log("robot in water:", JSON.stringify({ before, mid, after }));
+  }
+
+  // The golden briefcase in each lockable room: on a clear spot, never under the furniture.
+  if (scenario === "briefcase") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    for (const name of ["Marketing Lounge", "Supply Closet", "Restrooms"]) {
+      const info = await ev((n) => {
+        const s = window.__HT.scene, v = s.vault;
+        for (let k = 0; k < 80 && v.room.name !== n; k++) v.setupDay(s.dayCfg.chores);
+        v.unlock();
+        const b = v.brief;
+        const p = s.world.nearestWalkable(b.x, b.y + 150);
+        s.player.x = p.x; s.player.y = p.y;
+        const bb = b.getBounds();
+        const over = [...s.furniture.values()].filter((f) => f.sprite.visible && f.sprite.depth > -7000 && Phaser.Geom.Rectangle.Overlaps(f.sprite.getBounds(), bb)).map((f) => f.key);
+        return { room: v.room.name, x: Math.round(b.x), y: Math.round(b.y), overlapping: over };
+      }, name);
+      console.log("briefcase", JSON.stringify(info));
+      await sleep(500);
+      await shot(`bc-${name.split(" ")[0].toLowerCase()}`);
+    }
+  }
+
+  // The end-of-day memo for a couple of days (two lines each), and what every night's memo says.
+  if (scenario === "memo") {
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    for (let d = 1; d <= 12; d++) {
+      const m = await ev((day) => { const h = window.__HT, a = h.dayConfig(day), b = h.dayConfig(day + 1); return { ...h.scene.memoLines(a, b), chores: b.chores.length, len: b.lengthLevel, extra: b.extraTime, crunch: h.state.crunchSeconds() + b.extraTime }; }, d);
+      console.log(d, "->", d + 1, JSON.stringify(m));
+    }
+    for (const day of [1, 2, 5, 8]) {
+      await ev((d) => { const h = window.__HT; h.state.day = d; h.scene.dayCfg = h.dayConfig(d); h.scene.endOfDayMemo(); }, day);
+      await sleep(1800);
+      await shot(`memo-${day}`);
+      await ev(() => window.__HT.scene.ui.closeScreen("memo"));
+    }
+  }
+
+  // Open-Plan Office with the other dodge upgrades: Cubicle Ninja, Wet Floor Sign, Hot Desking, Office Romance; and
+  // the wall cooldown (a second wall right after the first stops you at it; once it's back you go through again).
+  if (scenario === "dashperks") {
+    await ev(() => { window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    const T = 64;
+    const setup = await ev((T) => {
+      const h = window.__HT, s = h.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      h.god(true);
+      for (const id of ["phasedash", "ninja", "wetfloor", "hotdesk", "romance"]) h.give(id, 1);
+      const q = { x: 5.5 * T, y: 13.3 * T };
+      s.world.resolveCircle(q, s.player.r);
+      s.player.x = q.x; s.player.y = q.y; s.player.vx = s.player.vy = 0;
+      // A coworker just past the wall, right in the dash's path.
+      const e = s.spawnEnemy("intern", q.x, q.y - 120, "hostile");
+      e.spawnGrace = 99;
+      window.__mark = e;
+      return { start: [Math.round(q.x), Math.round(q.y)], zone: s.map.zones[s.zoneAt(q.x, q.y)].name, internHp: Math.round(e.hp), deskJockeyLockedBy: h.state.lockedBy({ id: "deskjockey" })?.name ?? null, deskJockeyAvailable: h.state.available({ id: "deskjockey" }), hearts: s.pickups?.list?.length ?? null };
+    }, T);
+    console.log("setup", JSON.stringify(setup));
+    // Hold the direction until the dash has really started (headless frames are slow), then wait for it to land.
+    const dash = async (key) => {
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => (p.dodgeCharges > 0 || Date.now() - t0 > 5000 ? res() : setTimeout(f, 30)); f(); }));
+      await page.keyboard.down(key);
+      await sleep(60);
+      await page.keyboard.down("Space");
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => (p.rolling > 0 || Date.now() - t0 > 3000 ? res() : setTimeout(f, 10)); f(); }));
+      await page.keyboard.up("Space");
+      await page.keyboard.up(key);
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => (p.rolling <= 0 && !p.phasing) || Date.now() - t0 > 3000 ? res() : setTimeout(f, 20); f(); }));
+      await sleep(60);
+    };
+    const where = () => ev(() => {
+      const s = window.__HT.scene, p = s.player, z = s.zoneAt(p.x, p.y), e = window.__mark;
+      const wet = [...s.hazards.waterTiles].length;
+      return { at: [Math.round(p.x), Math.round(p.y)], zone: z >= 0 ? s.map.zones[z].name : "(wall!)", free: s.world.circleFree(p.x, p.y, p.r - 1), wallReady: p.wallReady, internHp: Math.round(e.hp), internStun: +e.stun.toFixed(2), wetTiles: wet, hotShots: p.hotShots, charges: p.dodgeCharges };
+    });
+    await dash("KeyW");
+    console.log("dash 1 (through the wall, through the intern)", JSON.stringify(await where()));
+    await shot("dp01-after-first");
+    // Straight back: the wall is on cooldown, so this one stops at the wall.
+    await dash("KeyS");
+    console.log("dash 2 (wall on cooldown)", JSON.stringify(await where()));
+    // Wait for the wall to be ready again, then through.
+    await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => (p.wallReady || Date.now() - t0 > 8000 ? res() : setTimeout(f, 50)); f(); }));
+    await dash("KeyS");
+    console.log("dash 3 (cooldown over)", JSON.stringify(await where()));
+    await shot("dp02-after-third");
+  }
+
+  // Live water: damage over time (a coworker can wade out), robots blow up, and a boss stuck in it gets insulated.
+  if (scenario === "livewater") {
+    await ev(() => { window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    await ev(() => {
+      const h = window.__HT, s = h.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      h.god(true);
+      const p = s.world.nearestWalkable(10 * 64, 19 * 64);
+      s.player.x = p.x + 400; s.player.y = p.y;
+      s.hazards.flood(p.x, p.y, 14, 0.001);
+      s.hazards.setAllElectric(true);
+      const n = s.spawnEnemy("intern", p.x, p.y, "hostile");
+      n.spawnGrace = 99;
+      const m = s.spawnEnemy("manager", p.x + 40, p.y + 30, "hostile");
+      m.spawnGrace = 99;
+      const r = s.spawnEnemy("robot", p.x - 40, p.y, "hostile");
+      r.spawnGrace = 99;
+      window.__lw = { n, m, r, t0: s.time.now };
+    });
+    const read = () => ev(() => {
+      const s = window.__HT.scene, w = window.__lw;
+      const f = (e) => ({ hp: Math.round(e.hp), dead: e.dead, wet: e.inWater, live: s.hazards.isElectric(e.x, e.y) });
+      return { t: +((s.time.now - w.t0) / 1000).toFixed(2), intern: f(w.n), manager: f(w.m), robot: { ...f(w.r), shortT: +w.r.shortT.toFixed(2) } };
+    });
+    for (let i = 0; i < 14; i++) {
+      const r = await read();
+      if (i % 2 === 0) console.log("live", JSON.stringify(r));
+      if (r.t > 6) break;
+      await sleep(400);
+    }
+    await shot("lw01");
+    // A boss parked in live water: hurt for a while, then insulated for a few seconds.
+    await ev(() => {
+      const s = window.__HT.scene, w = window.__lw;
+      const b = s.spawnEnemy("hatchet", w.n.x, w.n.y, "hostile");
+      b.spawnGrace = 99;
+      s.waves.boss = b;
+      w.b = b; w.bt0 = s.time.now; w.bhp = b.hp;
+    });
+    let ins = null;
+    for (let i = 0; i < 40; i++) {
+      const r = await ev(() => { const s = window.__HT.scene, w = window.__lw, b = w.b; return { t: +((s.time.now - w.bt0) / 1000).toFixed(2), hpLost: Math.round(w.bhp - b.hp), insulated: +b.insulated.toFixed(2), live: s.hazards.isElectric(b.x, b.y) }; });
+      if (i % 3 === 0) console.log("boss", JSON.stringify(r));
+      if (r.insulated > 0 && !ins) { ins = r; await shot("lw02-insulated"); }
+      if (ins && r.t > ins.t + 2) { console.log("boss while insulated", JSON.stringify(r), "hp lost since:", r.hpLost - ins.hpLost); break; }
+      await sleep(300);
+    }
+  }
+
+  // The CEO's borrowed moves: a charge through concrete (Server Core wall), the phase-3 double charge, the
+  // conference call (phase 2), the pivot (phase 3), no sprinklers while he liquidates, and the overnight repairs.
+  if (scenario === "ceomoves") {
+    await ev(() => { window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    const T = 64;
+    await ev((T) => {
+      const h = window.__HT, s = h.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      h.god(true);
+      const p = s.world.nearestWalkable(29 * T, 22.5 * T);
+      s.player.x = p.x; s.player.y = p.y;
+      const c = s.world.nearestWalkable(21.5 * T, 22.5 * T);
+      const b = s.spawnEnemy("ceo", c.x, c.y, "hostile");
+      s.waves.boss = b;
+      b.spawnGrace = 0;
+      b.chargeCd = 0.2; b.leapCd = 99; b.coinCd = 99;
+      window.__ceo = b;
+      window.__brokenConcrete = () => { let n = 0; for (let i = 0; i < s.map.tiles.length; i++) if (s.map.tiles[i] === 0 && s.world.tiles[i] !== 0) n++; return n; };
+    }, T);
+    const st = () => ev(() => { const s = window.__HT.scene, b = window.__ceo; return { x: Math.round(b.x), y: Math.round(b.y), wind: +b.chargeWind.toFixed(2), charging: +b.charging.toFixed(2), dizzy: +b.dizzy.toFixed(2), follow: b.ceoFollow, concreteBroken: window.__brokenConcrete(), los: b.hasLos, zone: s.zoneAt(b.x, b.y) >= 0 ? s.map.zones[s.zoneAt(b.x, b.y)].name : "(wall)", phase: b.ceoPhase, playerHp: window.__HT.state.hp }; });
+    let charges = 0, wasCharging = false, shotDone = false;
+    for (let i = 0; i < 60; i++) {
+      const r = await st();
+      if (r.charging > 0 && !wasCharging) charges++;
+      wasCharging = r.charging > 0;
+      if (i % 4 === 0) console.log("p1", JSON.stringify(r));
+      if (r.wind > 0.3 && !shotDone) { shotDone = true; await shot("cm01-windup-through-wall"); }
+      if (charges >= 1 && r.charging <= 0 && r.wind <= 0) { console.log("p1 end", JSON.stringify(r)); break; }
+      await sleep(150);
+    }
+    await shot("cm02-after-charge");
+    // Liquidation: he charges twice in a row.
+    await ev(() => {
+      const s = window.__HT.scene, b = window.__ceo;
+      b.hp = b.maxHp * 0.3; b.ceoPhase = 3; b.dizzy = 0; b.chargeCd = 0.1; b.pivotCd = 99; b.confCd = 99; b.reportCd = 99;
+      // Somewhere with a long run ahead, so the first charge ends on its own (not in a BONK).
+      const c = s.world.nearestWalkable(8 * 64, 22.5 * 64); b.x = c.x; b.y = c.y;
+      const p = s.world.nearestWalkable(b.x + 420, b.y); s.player.x = p.x; s.player.y = p.y;
+    });
+    charges = 0; wasCharging = false;
+    let follow = false;
+    for (let i = 0; i < 80; i++) {
+      const r = await st();
+      if (r.charging > 0 && !wasCharging) charges++;
+      wasCharging = r.charging > 0;
+      if (r.follow) follow = true;
+      if (charges >= 2 && r.charging <= 0) break;
+      if (r.dizzy > 0 && charges >= 1 && !follow) break;
+      await sleep(120);
+    }
+    console.log("p3 charges in a row:", charges, "follow-up seen:", follow, JSON.stringify(await st()));
+    // Conference call (phase 2) and the pivot (phase 3).
+    const proj = () => ev(() => window.__HT.scene.projectiles.list.filter((p) => p.active && !p.friendly).length);
+    await ev(() => { const b = window.__ceo; b.ceoPhase = 2; b.hp = b.maxHp * 0.5; b.charging = b.chargeWind = b.dizzy = 0; b.chargeCd = 99; b.confCd = 0; });
+    let phones = 0;
+    for (let i = 0; i < 30 && phones === 0; i++) { phones = await ev(() => window.__HT.scene.phoneBombs.length); await sleep(150); }
+    console.log("conference call -> phones on the floor:", phones);
+    await shot("cm03-conference");
+    await ev(() => { const b = window.__ceo; b.ceoPhase = 3; b.hp = b.maxHp * 0.3; b.confCd = 99; b.pivotCd = 0; });
+    const before = await proj();
+    let most = before;
+    for (let i = 0; i < 20; i++) { most = Math.max(most, await proj()); await sleep(100); }
+    console.log("pivot -> enemy projectiles", before, "->", most);
+    await shot("cm04-pivot");
+    // No sprinklers while he's liquidating.
+    const spr = await ev(() => {
+      const s = window.__HT.scene, b = window.__ceo;
+      b.pivotCd = 99;
+      for (let k = 0; k < 30; k++) { const p = s.world.nearestWalkable(s.player.x + (k % 6) * 64 - 160, s.player.y + Math.floor(k / 6) * 64 - 120); s.hazards.paperPatch(p.x, p.y, 1); s.hazards.igniteRadius(p.x, p.y, 70, 3); }
+      s.sprinklerCd = 0;
+      return s.hazards.burningCount;
+    });
+    await sleep(1200);
+    console.log("burning", spr, "->", await ev(() => window.__HT.scene.hazards.burningCount), "sprinklers with the CEO liquidating:", await ev(() => window.__HT.scene.sprinklerT > 0));
+    await ev(() => { window.__ceo.ceoPhase = 2; });
+    await sleep(800);
+    console.log("sprinklers once he's not liquidating:", await ev(() => window.__HT.scene.sprinklerT > 0));
+    // Overnight: the concrete and any speaker that fell off it are back.
+    const night = await ev(() => {
+      const h = window.__HT, s = h.scene;
+      // Knock the first speaker's wall out from under it (as a charge would).
+      const sp = s.speakers.list[0];
+      s.speakers.wallGone(Math.floor(sp.x / 64), Math.floor((sp.y - 34) / 64));
+      const broken = window.__brokenConcrete(), down = s.speakers.list.filter((p) => p.down).length;
+      h.day(2);
+      return { brokenBefore: broken, speakersDown: down, brokenAfter: window.__brokenConcrete(), speakersDownAfter: s.speakers.list.filter((p) => p.down).length };
+    });
+    console.log("overnight repairs", JSON.stringify(night));
+  }
+
+  // THE HEAD OF HR: the shield blocks from the front but not from behind, the bash into a wall stuns him, the
+  // megaphone cone, Mandatory Training, Zero Tolerance; and the boss plan avoids the bosses you met last.
+  if (scenario === "hrboss") {
+    await ev(() => { window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    const T = 64;
+    await ev((T) => {
+      const h = window.__HT, s = h.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      h.god(true);
+      const p = s.world.nearestWalkable(30 * T, 37 * T);
+      s.player.x = p.x; s.player.y = p.y;
+      const c = s.world.nearestWalkable(p.x + 300, p.y);
+      const b = s.spawnEnemy("hrhead", c.x, c.y, "hostile");
+      s.waves.boss = b;
+      b.spawnGrace = 0;
+      b.bashCd = b.pulseCd = b.bossSummonCd = b.pivotCd = 99;
+      window.__hrb = b;
+    }, T);
+    const st = () => ev(() => { const s = window.__HT.scene, b = window.__hrb, p = s.player; const want = Math.atan2(p.y - b.y, p.x - b.x); let df = Math.abs(((b.facing - want) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI); return { hp: Math.round(b.hp), max: Math.round(b.maxHp), facingOff: +df.toFixed(2), stun: +b.stun.toFixed(2), wind: +b.chargeWind.toFixed(2), charging: +b.charging.toFixed(2), x: Math.round(b.x), y: Math.round(b.y) }; });
+    // Pinned in the North Hall facing east (down the corridor): shoot him from the front, then from behind.
+    await ev((T) => {
+      const s = window.__HT.scene, b = window.__hrb;
+      const c = s.world.nearestWalkable(30 * T, 13.3 * T); b.x = c.x; b.y = c.y; b.vx = b.vy = 0;
+      b.spawnGrace = 99; b.facing = 0;
+      const p = s.world.nearestWalkable(35 * T, 13.3 * T); s.player.x = p.x; s.player.y = p.y;
+      window.__hall = { bx: c.x, by: c.y, px: p.x, py: p.y };
+    }, T);
+    await sleep(300);
+    const shoot = (fromBehind) => ev((fb) => {
+      const s = window.__HT.scene, b = window.__hrb;
+      const hp0 = b.hp;
+      b.vx = b.vy = 0;
+      for (let k = 0; k < 5; k++) {
+        const a = fb ? b.facing + Math.PI : b.facing;
+        const x = b.x + Math.cos(a) * 130, y = b.y + Math.sin(a) * 130;
+        s.projectiles.firePlayer("staple", x, y, Math.atan2(b.y - y, b.x - x));
+      }
+      return hp0;
+    }, fromBehind);
+    let hp0 = await shoot(false);
+    await sleep(1200);
+    console.log("front: hp", Math.round(hp0), "->", (await st()).hp, JSON.stringify(await st()));
+    hp0 = await shoot(true);
+    await sleep(1200);
+    console.log("behind: hp", Math.round(hp0), "->", (await st()).hp);
+    await shot("hr01-shield");
+    // The megaphone: a cone of five blasts.
+    const waves = () => ev(() => window.__HT.scene.projectiles.list.filter((p) => p.active && !p.friendly && p.kind === "wave").length);
+    // (The player a few steps away in the same room, so the blasts are still in the air when they're counted.)
+    await ev(() => { const s = window.__HT.scene, b = window.__hrb, h = window.__hall; b.x = h.bx; b.y = h.by; s.player.x = h.px; s.player.y = h.py; b.facing = 0; b.spawnGrace = 0; b.losTimer = 0; b.pulseCd = 0; });
+    let most = 0;
+    for (let i = 0; i < 15; i++) { most = Math.max(most, await waves()); await sleep(80); }
+    console.log("megaphone blasts:", most, JSON.stringify(await ev(() => { const s = window.__HT.scene, b = window.__hrb, p = s.player; return { d: Math.round(Math.hypot(p.x - b.x, p.y - b.y)), los: b.hasLos, pulseCd: +b.pulseCd.toFixed(2), stun: b.stun, grace: b.spawnGrace, slip: b.slip, mode: b.mode, lurking: b.lurking }; })));
+    // Disciplinary Action: in the corridor, his shield pointing at the north wall while you're down the hall. He
+    // turns slowly, so the bash goes into the wall: THUD, stunned.
+    await ev(() => {
+      const s = window.__HT.scene, b = window.__hrb, h = window.__hall;
+      b.pulseCd = 99;
+      b.x = h.bx; b.y = h.by; b.vx = b.vy = 0; s.player.x = h.px; s.player.y = h.py;
+      b.facing = -Math.PI / 2; b.losTimer = 0;
+      b.bashCd = 0; b.stun = 0;
+    });
+    let thud = null, wound = false, lunged = false;
+    for (let i = 0; i < 60; i++) {
+      const r = await st();
+      if (r.wind > 0) wound = true;
+      if (r.charging > 0) lunged = true;
+      if (lunged && r.charging <= 0) { thud = r; break; }
+      await sleep(60);
+    }
+    console.log("bash: wound up", wound, "lunged", lunged, "after", JSON.stringify(thud));
+    await shot("hr02-thud");
+    // Mandatory Training and Zero Tolerance.
+    await ev(() => { const b = window.__hrb; b.stun = 0; b.bashCd = 99; b.bossSummonCd = 0; });
+    let staff = 0;
+    for (let i = 0; i < 20 && !staff; i++) { staff = await ev(() => window.__HT.scene.enemies.filter((e) => !e.dead && e.summoner === window.__hrb).map((e) => e.type).join(",")); await sleep(100); }
+    console.log("mandatory training:", staff);
+    await ev(() => { const b = window.__hrb; b.hp = b.maxHp * 0.4; b.pivotCd = 0; b.bossSummonCd = 99; });
+    most = 0;
+    for (let i = 0; i < 20; i++) { most = Math.max(most, await waves()); await sleep(80); }
+    console.log("zero tolerance blasts:", most);
+    await shot("hr03-zero-tolerance");
+    // The boss plan: with the Consultant and the Cold Caller met last, day 3 is the Hatchet Man or the Head of HR.
+    const plan = await ev(() => {
+      const h = window.__HT, st = h.state;
+      st.noteBoss("consultant"); st.noteBoss("caller");
+      const first = {}, second = {};
+      for (let k = 0; k < 400; k++) { st.reset(); const a = st.bossFor(3), b = st.bossFor(6); first[a] = (first[a] ?? 0) + 1; second[b] = (second[b] ?? 0) + 1; if (a === b) return "SAME BOSS TWICE"; }
+      return { first, second };
+    });
+    console.log("boss plan after meeting consultant + caller:", JSON.stringify(plan));
   }
 
   if (scenario === "stress") {
@@ -405,6 +975,20 @@ try {
     await page.keyboard.press("Space");
     await sleep(1500);
     const rect = (sel) => ev((s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }, sel);
+    const prog = () => ev(() => parseFloat(document.querySelector(".mini-prog > div")?.style.width ?? "") || 0);
+    // A steady hand: press, then many small moves a moment apart along a straight line at `speed` px/s. Each
+    // point comes from the clock, so the slow headless frame rate can't turn the drag into a crawl or a flick.
+    const drag = async (x0, y0, x1, y1, speed) => {
+      await page.mouse.move(x0, y0);
+      await page.mouse.down();
+      const len = Math.hypot(x1 - x0, y1 - y0), t0 = Date.now();
+      for (let f = 0; f < 1; ) {
+        await sleep(12);
+        f = Math.min(1, (speed * (Date.now() - t0)) / 1000 / len);
+        await page.mouse.move(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, { steps: 2 });
+      }
+      await page.mouse.up();
+    };
     for (const c of ["plant", "print", "shred", "coffee", "presentation", "memos", "server", "emails", "jam", "wifi", "mail", "board"]) {
       await ev((chore) => { const s = window.__HT.scene; s.mini?.close(); s.mini = null; s.startMini(chore, () => {}); }, c);
       await sleep(700);
@@ -417,7 +1001,29 @@ try {
       } else if (c === "print" || c === "presentation") {
         for (let i = 0; i < 3; i++) { await page.keyboard.press("Space"); await sleep(260); }
       } else if (c === "shred") {
-        for (let i = 0; i < 7; i++) { await page.keyboard.press("Space"); await sleep(70); }
+        // Real drags: a steady stroke at a moderate speed (one whole document), a fast flick (it should jam),
+        // then another steady stroke, caught mid-drag with the needle in JUST RIGHT.
+        const r = await rect(".mini-stage");
+        if (r) {
+          const x = r.x + r.w * 0.5, top = r.y + r.h * 0.08, bottom = r.y + r.h * 0.74, steady = r.h * 0.5;
+          const info = async () => ({ prog: await prog(), ...(await ev(() => ({ zone: document.querySelector(".sh-gauge")?.dataset.z, jammed: !!document.querySelector(".sh-head.jam") }))) });
+          await drag(x, top, x, bottom, steady);
+          console.log("  shred stroke", JSON.stringify(await info()));
+          await sleep(400);
+          await page.mouse.move(x, top);
+          await page.mouse.down();
+          for (let i = 1; i <= 3; i++) await page.mouse.move(x, top + r.h * 0.22 * i);
+          console.log("  shred flick", JSON.stringify(await info()));
+          await page.mouse.up();
+          await sleep(900);
+          const stroke = drag(x, top, x, bottom, steady);
+          await sleep(700);
+          await shot("m-shred-drag");
+          console.log("  shred mid-drag", JSON.stringify(await info()));
+          await stroke;
+          await sleep(300);
+          console.log("  shred after", JSON.stringify(await info()));
+        }
       } else if (c === "coffee") {
         for (let i = 0; i < 3; i++) {
           const r = await rect(".cf-leak:not(.fixed)");
@@ -456,7 +1062,47 @@ try {
       } else if (c === "jam") {
         for (const k of ["KeyA", "KeyD", "KeyA", "KeyD", "KeyA", "KeyD", "KeyD"]) { await page.keyboard.press(k); await sleep(90); }
       } else if (c === "wifi") {
-        await sleep(1700);
+        // GET READY first (the stage can't be dragged meanwhile). Then swing the antennas with a mouse drag, and
+        // follow the signal as it sweeps with held keys: keep going while the bars rise, turn round when they drop.
+        const wifi = async () => ({ prog: await prog(), ...(await ev(() => ({
+          text: document.querySelector(".wf-state")?.textContent,
+          ready: !!document.querySelector(".m-ready"),
+          alert: !!document.querySelector(".wf-alert"),
+          sig: [...document.querySelectorAll(".wf-bars b")].reduce((a, b) => a + (Number(/scaleY\(([\d.]+)\)/.exec(b.style.transform)?.[1]) || 0), 0) / 5,
+          angle: Number(/rotate\(([-\d.]+)\)/.exec(document.querySelector(".wf-ant")?.getAttribute("transform") ?? "")?.[1] ?? 0)
+        }))) });
+        const r = await rect(".mini-stage");
+        const atStart = await wifi();
+        await shot("m-wifi-ready");
+        if (r) {
+          const y = r.y + r.h * 0.5;
+          await drag(r.x + r.w * 0.6, y, r.x + r.w * 0.4, y, r.w * 0.3);
+        }
+        console.log("  wifi at the start", JSON.stringify(atStart), "| a drag during GET READY moved it to", (await wifi()).angle);
+        await page.waitForFunction(() => !document.querySelector(".m-ready"), { timeout: 15000 });
+        if (r) {
+          const y = r.y + r.h * 0.5;
+          await drag(r.x + r.w * 0.6, y, r.x + r.w * 0.4, y, r.w * 0.3);
+          console.log("  wifi after drag", JSON.stringify(await wifi()));
+        }
+        let dir = 1, held = null, last = -1, strongT = 0, losses = 0;
+        const hold = async (key) => {
+          if (held === key) return;
+          if (held) await page.keyboard.up(held);
+          held = key;
+          if (key) await page.keyboard.down(key);
+        };
+        for (const t0 = Date.now(); Date.now() - t0 < 14000; ) {
+          const w = await wifi();
+          if (w.prog >= 99) break;
+          if (w.text === "STRONG") strongT++;
+          if (w.sig < last - 0.01 || w.angle >= 74 || w.angle <= -74) dir = w.angle >= 74 ? -1 : w.angle <= -74 ? 1 : -dir;
+          last = w.sig;
+          await hold(dir > 0 ? "KeyD" : "KeyA");
+          await sleep(60);
+        }
+        await hold(null);
+        console.log("  wifi", JSON.stringify(await wifi()), "strong readings:", strongT);
       } else if (c === "mail") {
         for (const k of ["Digit1", "Digit2", "Digit3"]) { await page.keyboard.press(k); await sleep(420); }
       } else if (c === "board") {
@@ -506,6 +1152,285 @@ try {
         await shot(`c${String(2 + Math.floor(i / 8)).padStart(2, "0")}-combat`);
       }
     }
+  }
+
+  // The Konami code on the Performance Review opens the cheat sheet; what it hands out sticks for the run.
+  if (scenario === "cheats") {
+    const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "KeyB", "KeyA"];
+    const typeKeys = async (keys) => { for (const k of keys) { await page.keyboard.press(k); await sleep(35); } };
+    const isOpen = () => ev(() => !!document.querySelector("#cheats"));
+    const click = async (sel) => { await page.click(sel); await sleep(140); };
+    const visible = () => ev(() => [...document.querySelectorAll(".ch-perk:not(.hidden)")].map((r) => r.dataset.id));
+    const snap = () => ev(() => {
+      const h = window.__HT;
+      return { stacks: { ...h.state.stacks }, hp: h.state.hp, maxHp: h.state.stats.maxHp, revives: h.state.revivesLeft, bank: h.state.bank, owned: Object.keys(h.state.unlocked).filter((w) => h.state.unlocked[w]), god: h.scene.godMode, muted: h.scene.audio.muted };
+    });
+    // Window key listeners via the DevTools protocol: opening and closing the sheet must leave the count unchanged.
+    const cdp = await page.createCDPSession();
+    const keyListeners = async () => {
+      const { result } = await cdp.send("Runtime.evaluate", { expression: "window" });
+      const { listeners } = await cdp.send("DOMDebugger.getEventListeners", { objectId: result.objectId });
+      await cdp.send("Runtime.releaseObject", { objectId: result.objectId });
+      return listeners.filter((l) => l.type === "keydown" || l.type === "keyup").length;
+    };
+    await sleep(700);
+    await page.keyboard.press("Space");
+    await sleep(1200);
+    await typeKeys(KONAMI);
+    await sleep(200);
+    console.log("konami during crunch -> open:", await isOpen());
+    await ev(() => { const h = window.__HT; h.state.bank = 80; h.scene.endCrunch(true); });
+    await sleep(900);
+    await page.keyboard.press("Space");
+    await sleep(1600);
+    console.log("review up:", await ev(() => !!document.querySelector("#review")), "phase:", await ev(() => window.__HT.phase()));
+    const baseListeners = await keyListeners();
+    // A wrong key starts over; a held key's auto-repeat is not a second press.
+    await typeKeys(["ArrowUp", "ArrowUp", "ArrowDown", "KeyX", ...KONAMI.slice(3)]);
+    console.log("wrong key -> open:", await isOpen());
+    await page.keyboard.down("ArrowUp"); await page.keyboard.down("ArrowUp"); await page.keyboard.up("ArrowUp");
+    await typeKeys(KONAMI.slice(2));
+    console.log("auto-repeat -> open:", await isOpen());
+    // A stray Up mid-code restarts it, and Up Up Up still counts.
+    await typeKeys(["ArrowUp", "ArrowUp", "ArrowDown", "ArrowUp", "ArrowUp", "ArrowUp", ...KONAMI.slice(2)]);
+    console.log("konami -> open:", await isOpen(), "| search focused:", await ev(() => !!document.activeElement?.matches(".ch-search input")), "| review inert:", await ev(() => document.querySelector("#review").inert), "| key listeners", baseListeners, "->", await keyListeners());
+    await sleep(700);
+    await shot("k01-cheats");
+    console.log("before", JSON.stringify(await snap()));
+    await click('.ch-perk[data-id="hp"] .inc');
+    await click('.ch-perk[data-id="dmg"] .inc');
+    await click('.ch-perk[data-id="dmg"] .inc');
+    await click('.ch-perk[data-id="dmg"] .dec');
+    await click('.ch-perk[data-id="parachute"] .inc');
+    await click('.ch-perk[data-id="parachute"] .inc');
+    await click('.ch-perk[data-id="flex"] .inc');
+    // Minus takes the heart (clamped to the new max) and the parachute's revive back off; plus puts them back.
+    await click('.ch-perk[data-id="hp"] .dec');
+    await click('.ch-perk[data-id="parachute"] .dec');
+    console.log("minus hp + parachute", JSON.stringify(await snap()));
+    // Open-Plan Office locks Desk Jockey (with a lock tag); taking it off unlocks it again.
+    const lockTag = () => ev(() => { const t = document.querySelector('.ch-perk[data-id="deskjockey"] .ch-tag.lock'); const row = t.closest(".ch-perk"); return { shown: !t.classList.contains("hidden"), text: t.textContent.trim(), rowMaxed: row.classList.contains("max") }; });
+    await click('.ch-perk[data-id="phasedash"] .inc');
+    console.log("desk jockey with phase dash", JSON.stringify(await lockTag()));
+    await click('.ch-perk[data-id="phasedash"] .dec');
+    console.log("desk jockey without", JSON.stringify(await lockTag()));
+    await click('.ch-perk[data-id="hp"] .inc');
+    await click('.ch-perk[data-id="parachute"] .inc');
+    // The coffee, the laser and one of today's gun offers (which must then be off the table in the review).
+    const offered = await ev(() => window.__HT.scene.reviewGuns.map((g) => g.id));
+    for (const w of new Set(["laser", "coffee", offered[0]])) await click(`.ch-gun[data-w="${w}"]`);
+    await click(".ch-god");
+    console.log("after clicks", JSON.stringify(await snap()));
+    console.log("sheet shows", JSON.stringify(await ev(() => ({
+      dmg: document.querySelector('.ch-perk[data-id="dmg"] .ch-n').textContent,
+      parachute: document.querySelector('.ch-perk[data-id="parachute"] .ch-n').textContent,
+      parachutePlusDisabled: document.querySelector('.ch-perk[data-id="parachute"] .inc').disabled,
+      glassMinusDisabled: document.querySelector('.ch-perk[data-id="glass"] .dec').disabled,
+      laserPerkTag: document.querySelector('.ch-perk[data-id="laser"] .need').className,
+      irishTag: document.querySelector('.ch-perk[data-id="irish"] .need').className,
+      god: document.querySelector(".ch-god").getAttribute("aria-checked"),
+      hearts: document.querySelector(".ch-hp").textContent
+    }))));
+    // Max out the review's first upgrade offer here: buying it in the review afterwards must not take money.
+    const maxedOffer = await ev(() => window.__HT.scene.reviewOffers[0].perk.id);
+    const incOpen = () => ev((id) => !document.querySelector(`.ch-perk[data-id="${id}"] .inc`).disabled, maxedOffer);
+    for (let i = 0; i < 6 && (await incOpen()); i++) await click(`.ch-perk[data-id="${maxedOffer}"] .inc`);
+    console.log("maxed", maxedOffer, "->", await ev((id) => document.querySelector(`.ch-perk[data-id="${id}"] .ch-n`).textContent, maxedOffer));
+    // Typing in the search box (M mutes the game, P pauses it) must never reach the game.
+    await page.click(".ch-search input");
+    await page.keyboard.type("mic", { delay: 60 });
+    await sleep(300);
+    console.log("search 'mic' ->", JSON.stringify(await visible()), await ev(() => document.querySelector(".ch-count").textContent));
+    console.log("typed m: muted", (await snap()).muted, "| Phaser keys held:", await ev(() => window.__HT.scene.input.keyboard.keys.filter((k) => k && k.isDown).map((k) => k.keyCode)));
+    await shot("k02-cheats-search");
+    await page.click(".ch-search input", { clickCount: 3 });
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type("pa");
+    await sleep(200);
+    console.log("search 'pa' ->", (await visible()).length, "rows");
+    await page.click(".ch-search input", { clickCount: 3 });
+    await page.keyboard.press("Backspace");
+    await click('.ch-chip[data-f="owned"]');
+    console.log("OWNED chip ->", JSON.stringify(await visible()));
+    await click('.ch-chip[data-f="chore"]');
+    console.log("CHORE chip ->", (await visible()).length, "rows", await ev(() => document.querySelector(".ch-count").textContent));
+    await shot("k03-cheats-chore");
+    await click('.ch-chip[data-f="all"]');
+    // Smaller windows: the sheet re-flows (one scrolling page below 860 px) and still fits.
+    for (const [w, hgt] of [[1024, 768], [820, 560]]) {
+      await page.setViewport({ width: w, height: hgt });
+      await sleep(600);
+      console.log(`${w}x${hgt}`, JSON.stringify(await ev(() => {
+        const p = document.querySelector(".ch-panel").getBoundingClientRect(), list = document.querySelector(".ch-list");
+        return { panel: [Math.round(p.width), Math.round(p.height)], fits: p.left >= 0 && p.right <= innerWidth && p.bottom <= innerHeight, perkColumns: getComputedStyle(list).gridTemplateColumns.split(" ").length };
+      })));
+      await shot(`k03-cheats-${w}`);
+    }
+    await page.setViewport({ width: 1280, height: 720 });
+    await sleep(600);
+    await page.keyboard.press("Escape");
+    await sleep(400);
+    console.log("Esc -> open:", await isOpen(), "| review inert:", await ev(() => document.querySelector("#review")?.inert), "| key listeners:", await keyListeners(), "| Phaser keys held:", await ev(() => window.__HT.scene.input.keyboard.keys.filter((k) => k && k.isDown).length));
+    console.log("review cards", JSON.stringify(await ev(() => { const s = window.__HT.scene; return [...document.querySelectorAll("#review .card")].map((c) => ({ id: s.reviewOffers[Number(c.dataset.i)].perk.id, cls: c.className.replace("card ", ""), own: c.querySelector(".c-own")?.textContent })); })));
+    console.log("review guns", JSON.stringify(await ev(() => { const h = window.__HT; return [...document.querySelectorAll("#review .gun")].map((g) => { const id = h.scene.reviewGuns[Number(g.dataset.g)].id; return { id, owned: h.state.unlocked[id], cls: g.className }; }); })));
+    console.log("click the maxed offer", JSON.stringify(await ev((id) => {
+      const h = window.__HT, s = h.scene, i = s.reviewOffers.findIndex((o) => o.perk.id === id), before = h.state.bank;
+      document.querySelector(`#review .card[data-i="${i}"]`)?.click();
+      return { id, bank: [before, h.state.bank], sold: s.reviewOffers[i].sold };
+    }, maxedOffer)));
+    await shot("k04-review-after");
+    // Reopen: clicks inside the guard are ignored (done in the same tick so a slow machine can't miss the window),
+    // a drag out of (or into) the panel is not a backdrop click, a real one closes.
+    console.log("clicks inside the guard", JSON.stringify(await ev(() => {
+      const h = window.__HT;
+      h.cheats();
+      const r = document.querySelector("#cheats"), before = h.state.stack("speed");
+      r.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      r.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+      r.click();
+      r.querySelector('.ch-perk[data-id="speed"] .inc').click();
+      return { open: !!document.querySelector("#cheats"), speed: [before, h.state.stack("speed")] };
+    })));
+    await sleep(450);
+    for (const [from, to] of [[[700, 400], [1268, 12]], [[1268, 12], [700, 400]]]) {
+      await page.mouse.move(...from);
+      await page.mouse.down();
+      await page.mouse.move(...to, { steps: 4 });
+      await page.mouse.up();
+      await sleep(100);
+    }
+    console.log("drag out of / into the panel -> open:", await isOpen(), "| stacks unchanged:", JSON.stringify(await ev(() => window.__HT.state.stacks)));
+    await page.mouse.click(1268, 12);
+    await sleep(200);
+    console.log("backdrop click -> open:", await isOpen());
+    await typeKeys(KONAMI);
+    await sleep(500);
+    console.log("konami again -> open:", await isOpen());
+    await page.click('#cheats [data-act="close"]');
+    await sleep(300);
+    console.log("CLOSE button -> open:", await isOpen());
+    for (let i = 0; i < 6; i++) { await ev(() => window.__HT.cheats()); await sleep(50); await page.keyboard.press("Escape"); await sleep(50); }
+    console.log("6x open/close -> open:", await isOpen(), "| sheets in DOM:", await ev(() => document.querySelectorAll("#cheats").length), "| key listeners", baseListeners, "->", await keyListeners());
+    // Buying in the review still works afterwards.
+    await sleep(300);
+    console.log("buy after cheats", JSON.stringify(await ev(() => {
+      const h = window.__HT, s = h.scene;
+      const i = s.reviewOffers.findIndex((o) => !o.sold && h.state.canTake(o.perk) && h.state.bank >= o.perk.cost);
+      const before = h.state.bank;
+      document.querySelector(`#review .card[data-i="${i}"]`)?.click();
+      return { id: i >= 0 ? s.reviewOffers[i].perk.id : null, bank: [before, h.state.bank], sold: i >= 0 ? s.reviewOffers[i].sold : null };
+    })));
+    await sleep(300);
+    // Click both gun offers: the one already owned is locked, the other one sells.
+    console.log("buy a gun after cheats", JSON.stringify(await ev(() => {
+      const h = window.__HT, s = h.scene;
+      const before = h.state.bank;
+      document.querySelectorAll("#review .gun").forEach((g) => g.click());
+      return { guns: s.reviewGuns.map((g) => `${g.id}${g.sold ? " SOLD" : ""}`), bank: [before, h.state.bank] };
+    })));
+    await sleep(700);
+    await shot("k05-review-bought");
+    await page.click("#go");
+    await sleep(1200);
+    console.log("BACK TO WORK -> phase:", await ev(() => window.__HT.phase()));
+    await ev(() => window.__HT.toFight());
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(1500);
+    console.log("in the fight", JSON.stringify(await ev(() => {
+      const h = window.__HT, s = h.scene;
+      const hp = h.state.hp;
+      s.player.invuln = 0;
+      const died = s.player.damage(4, s.player.x + 20, s.player.y);
+      return { phase: s.phase, hit: [hp, h.state.hp], died, slots: [...document.querySelectorAll(".hb-slot")].map((e) => e.dataset.w), dmgMult: h.state.stats.dmgMult };
+    })));
+    await typeKeys(KONAMI);
+    await sleep(200);
+    await ev(() => window.__HT.cheats());
+    console.log("konami / __HT.cheats() in the fight -> open:", await isOpen());
+    console.log("persisted", JSON.stringify(await snap()));
+    await shot("k06-fight");
+  }
+
+  // Fire up close: a burning paper pile, bare-floor flickers and a burning coworker, in the fight's dark.
+  if (scenario === "fire") {
+    await page.mouse.move(640, 360);
+    await ev(() => { window.__HT.god(true); window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(1400);
+    const setup = await ev(() => {
+      const s = window.__HT.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      s.sprinklerCd = 999;
+      const pl = s.player;
+      s.hazards.paperPatch(pl.x + 210, pl.y + 90, 3);
+      s.hazards.igniteRadius(pl.x + 210, pl.y + 90, 160, 2);
+      // What an explosion leaves on bare floor: short flickers.
+      s.hazards.igniteRadius(pl.x - 210, pl.y + 100, 80, 4);
+      const p = s.world.nearestWalkable(pl.x - 90, pl.y - 50);
+      const e = s.spawnEnemy("fulltime", p.x, p.y, "hostile");
+      e.spawnGrace = 0;
+      e.stun = 30;
+      e.burn = 3;
+      e.burnDps = 1;
+      window.__fireE = e;
+      return { burning: s.hazards.fire.filter((f) => f > 0).length, paper: s.hazards.paper.filter((f) => f > 0).length };
+    });
+    console.log("fire", JSON.stringify(setup));
+    const keepBurning = () => ev(() => { const e = window.__fireE; if (e && !e.dead) { e.burn = 3; e.stun = 30; } });
+    const fireInfo = () => ev(() => { const s = window.__HT.scene; return { burning: s.hazards.burningCount, perf: window.__HT.perf(), hazards: window.__HT.prof().hazards }; });
+    await sleep(400);
+    await shot("f01-fire");
+    await keepBurning();
+    await sleep(600);
+    await shot("f02-fire");
+    console.log("fire", JSON.stringify(await fireInfo()));
+    // Cost of one hazards update with this blaze on screen (dt 0: nothing burns down), immune to frame pacing.
+    console.log("hazards.update ms", await ev(() => { const hz = window.__HT.scene.hazards; const t = performance.now(); for (let k = 0; k < 40; k++) hz.update(0); return +((performance.now() - t) / 40).toFixed(3); }));
+    await keepBurning();
+    await sleep(500);
+    await shot("f03-fire");
+    // A closer look (the camera zoom is only ever reset on resize).
+    const zoom = (k) => ev((f) => { const cam = window.__HT.scene.cameras.main; const z0 = cam.zoom; cam.setZoom(z0 * f); return z0; }, k);
+    const unzoom = (z0) => ev((v) => window.__HT.scene.cameras.main.setZoom(v), z0);
+    const z = await zoom(2);
+    await keepBurning();
+    await sleep(250);
+    await shot("f04-fire-zoom");
+    await unzoom(z);
+    // Frame pacing varies headless: wait on the fire itself (every tile dying down) for the next shots.
+    const hottest = () => ev(() => Math.max(...window.__HT.scene.hazards.fire));
+    for (let k = 0; k < 80 && (await hottest()) > 1.2; k++) { await keepBurning(); await sleep(100); }
+    console.log("fire", JSON.stringify(await fireInfo()));
+    await shot("f05-fire-dying");
+    for (let k = 0; k < 80 && (await fireInfo()).burning > 0; k++) { await keepBurning(); await sleep(150); }
+    await sleep(400);
+    const pools = () => ev(() => { const hz = window.__HT.scene.hazards; return { pooled: Object.fromEntries(Object.entries(hz.flamePools).map(([k, v]) => [k, v.length])), tiles: hz.flames.size, bodies: hz.bodies.size }; });
+    console.log("fire", JSON.stringify(await fireInfo()), JSON.stringify(await pools()));
+    await shot("f06-fire-out");
+    // The burning coworker on their own, up close.
+    await ev(() => { const s = window.__HT.scene, e = window.__fireE; const p = s.world.nearestWalkable(e.x + 80, e.y + 40); s.player.x = p.x; s.player.y = p.y; });
+    await keepBurning();
+    const z2 = await zoom(2.6);
+    await sleep(350);
+    await shot("f07-coworker-zoom");
+    await unzoom(z2);
+    // Put out (as a puddle would): the blaze must go back to the pool.
+    await ev(() => { window.__fireE.burn = 0; });
+    await sleep(400);
+    console.log("put out", JSON.stringify(await pools()));
+    // An explosion next to the player (no damage) and what it leaves behind.
+    await ev(() => { const s = window.__HT.scene; s.explosion(s.player.x + 170, s.player.y + 20, 150, 0, { friendly: true }); });
+    await sleep(30);
+    await shot("f08-explosion");
+    await sleep(200);
+    await shot("f09-explosion-after");
+    // A burning coworker who is removed takes their blaze with them at once.
+    await keepBurning();
+    await sleep(300);
+    console.log("removed", JSON.stringify(await ev(() => { const s = window.__HT.scene, e = window.__fireE; const before = s.hazards.bodies.size; s.removeEnemy(e); return { before, after: s.hazards.bodies.size }; })));
   }
 } catch (e) {
   console.log("SCRIPT ERROR", e);
