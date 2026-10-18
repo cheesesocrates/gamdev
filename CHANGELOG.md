@@ -69,7 +69,7 @@ When a batch ships, the Unreleased lines move under a new version heading with t
   says "DAY 3 / 9". Tomorrow's memo always names the right boss.
 - Gameplay: **the CEO** (day 9) is the grand finish. He comes down in the lift and, the first time only, gets an
   entrance: the floor freezes, letterbox bars slide in, the camera cuts to him and he trash-talks you ("So. You're the
-  one costing me five salaries.") before the fight (click / Space to go on, Esc or SKIP to skip). Three phases, each
+  one costing me multiple employees.") before the fight (click / Space to go on, Esc or SKIP to skip). Three phases, each
   of which has to be fought (damage stops at the next phase's line until he moves on, with a speech and a shockwave
   in between): **Quarterly Review** (fans of gold coins; golden-parachute leaps that land where a red ring marks the
   floor), **Restructuring** (two HR Directors called up as security, double coin fans, landings that scatter coins)
@@ -129,6 +129,26 @@ When a batch ships, the Unreleased lines move under a new version heading with t
 - Balance: later days are a little easier on chores and time. At most 6 chores a day (was 7), each chore grows about
   20% less per level and stops growing after 6 levels, and from day 4 you get **+4 s of Crunch Time a day** (up to +20 s
   by day 8). The day banner and the memo only say "chores take longer" on days they really do.
+- Gameplay: **the CEO borrows every other boss's moves**, so the finale is bigger than any fight before it:
+  - **Hostile Takeover** (all phases): the Hatchet Man's charge (stomp, red lane, lock on), faster, and nothing
+    inside the building stops it. He smashes through drywall, glass and **concrete** (the Server Core included),
+    furniture and server racks, and bowls coworkers over. Only the building's outer walls, the code-locked room and
+    heavy machines stop him: then it's BONK and he's dizzy for 1.6 s (free hits). He can come at you through a wall
+    when he can't see you, if you're close. Bigger shake and a hit-stop on impact.
+  - **Conference Call** (from phase 2): the Cold Caller's ring of ringing desk phones around you (5, then 7 in
+    phase 3).
+  - **Pivot** (phase 3): the Consultant's spin, a full ring of 20 gold coins and memos.
+  - **Liquidation** charges come in pairs: when a charge ends without a BONK he skids, turns round and charges again
+    on a short wind-up.
+  - Liquidation also cuts the sprinkler budget ("The sprinkler budget has been liquidated. Please continue
+    working."): no sprinklers while he's in phase 3, and the music speeds up.
+  - The phase-change speech cuts short whatever he was doing, and his moves are spaced out so two never start at once.
+- Story: the CEO's first line is "So. You're the one costing me multiple employees." (was "five salaries").
+- Fix (UI): the PA caption ("The CEO is on his way down to the floor.") no longer sits on top of the CEO's
+  cutscene lines; it stops when the cutscene starts.
+- World: holes smashed in the concrete are repaired overnight like drywall and glass, and a PA speaker on a wall that
+  gets knocked down falls off (sparks) until the overnight repairs.
+- Audio: the fight music is a little quieter (about 17% lower).
 
 ### Story and announcements
 - A short intro when you start a run: you're the best employee, and the most expensive, and budget cuts are coming.

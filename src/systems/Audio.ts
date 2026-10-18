@@ -32,7 +32,7 @@ export const MUSIC_FILES: { key: string; file: string }[] = [
 
 export type MusicTrack = "title" | "lobby" | "review" | "fight" | "gameover" | "none";
 
-const TRACK_GAIN: Record<MusicTrack, number> = { title: 0.55, lobby: 0.7, review: 0.6, fight: 0.75, gameover: 0.6, none: 0 };
+const TRACK_GAIN: Record<MusicTrack, number> = { title: 0.55, lobby: 0.7, review: 0.6, fight: 0.62, gameover: 0.6, none: 0 };
 const SETTINGS_KEY = "hostile-takeover-audio";
 
 /** Groups variant files (staple_0..4) under one name and plays them with pitch jitter. */

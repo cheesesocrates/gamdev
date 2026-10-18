@@ -449,15 +449,18 @@ try {
         return q;
       }, c);
       c.x = start.x; c.y = start.y;
-      await sleep(250);
-      // Aim the dash with the key, then let go: what's measured is where the dash alone put you.
+      // Each case gets a fresh wall-phase (no cooldown left over from the last one) and a dodge charge.
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => ((p.wallReady && p.dodgeCharges > 0) || Date.now() - t0 > 6000 ? res() : setTimeout(f, 30)); f(); }));
+      // Aim the dash with the key (held until the dash has started), then let go: what's measured is where the dash alone put you.
       await page.keyboard.down(c.key);
-      await sleep(30);
-      await page.keyboard.press("Space");
-      await sleep(40);
+      await sleep(60);
+      await page.keyboard.down("Space");
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => (p.rolling > 0 || Date.now() - t0 > 3000 ? res() : setTimeout(f, 10)); f(); }));
+      await page.keyboard.up("Space");
       await page.keyboard.up(c.key);
       if (c.name.startsWith("drywall")) await shot("ph01-mid-dash");
-      await sleep(350);
+      await ev(() => new Promise((res) => { const p = window.__HT.scene.player; const t0 = Date.now(); const f = () => ((p.rolling <= 0 && !p.phasing) || Date.now() - t0 > 3000 ? res() : setTimeout(f, 20)); f(); }));
+      await sleep(80);
       const r = await ev((cc) => {
         const s = window.__HT.scene, p = s.player, w = s.world;
         const z = s.zoneAt(p.x, p.y);
@@ -663,6 +666,100 @@ try {
       if (ins && r.t > ins.t + 2) { console.log("boss while insulated", JSON.stringify(r), "hp lost since:", r.hpLost - ins.hpLost); break; }
       await sleep(300);
     }
+  }
+
+  // The CEO's borrowed moves: a charge through concrete (Server Core wall), the phase-3 double charge, the
+  // conference call (phase 2), the pivot (phase 3), no sprinklers while he liquidates, and the overnight repairs.
+  if (scenario === "ceomoves") {
+    await ev(() => { window.__HT.toFight(); });
+    await sleep(300);
+    await ev(() => window.__HT.toFight());
+    await sleep(800);
+    const T = 64;
+    await ev((T) => {
+      const h = window.__HT, s = h.scene;
+      for (const e of [...s.enemies]) s.removeEnemy(e);
+      s.quota = 999;
+      h.god(true);
+      const p = s.world.nearestWalkable(29 * T, 22.5 * T);
+      s.player.x = p.x; s.player.y = p.y;
+      const c = s.world.nearestWalkable(21.5 * T, 22.5 * T);
+      const b = s.spawnEnemy("ceo", c.x, c.y, "hostile");
+      s.waves.boss = b;
+      b.spawnGrace = 0;
+      b.chargeCd = 0.2; b.leapCd = 99; b.coinCd = 99;
+      window.__ceo = b;
+      window.__brokenConcrete = () => { let n = 0; for (let i = 0; i < s.map.tiles.length; i++) if (s.map.tiles[i] === 0 && s.world.tiles[i] !== 0) n++; return n; };
+    }, T);
+    const st = () => ev(() => { const s = window.__HT.scene, b = window.__ceo; return { x: Math.round(b.x), y: Math.round(b.y), wind: +b.chargeWind.toFixed(2), charging: +b.charging.toFixed(2), dizzy: +b.dizzy.toFixed(2), follow: b.ceoFollow, concreteBroken: window.__brokenConcrete(), los: b.hasLos, zone: s.zoneAt(b.x, b.y) >= 0 ? s.map.zones[s.zoneAt(b.x, b.y)].name : "(wall)", phase: b.ceoPhase, playerHp: window.__HT.state.hp }; });
+    let charges = 0, wasCharging = false, shotDone = false;
+    for (let i = 0; i < 60; i++) {
+      const r = await st();
+      if (r.charging > 0 && !wasCharging) charges++;
+      wasCharging = r.charging > 0;
+      if (i % 4 === 0) console.log("p1", JSON.stringify(r));
+      if (r.wind > 0.3 && !shotDone) { shotDone = true; await shot("cm01-windup-through-wall"); }
+      if (charges >= 1 && r.charging <= 0 && r.wind <= 0) { console.log("p1 end", JSON.stringify(r)); break; }
+      await sleep(150);
+    }
+    await shot("cm02-after-charge");
+    // Liquidation: he charges twice in a row.
+    await ev(() => {
+      const s = window.__HT.scene, b = window.__ceo;
+      b.hp = b.maxHp * 0.3; b.ceoPhase = 3; b.dizzy = 0; b.chargeCd = 0.1; b.pivotCd = 99; b.confCd = 99; b.reportCd = 99;
+      // Somewhere with a long run ahead, so the first charge ends on its own (not in a BONK).
+      const c = s.world.nearestWalkable(8 * 64, 22.5 * 64); b.x = c.x; b.y = c.y;
+      const p = s.world.nearestWalkable(b.x + 420, b.y); s.player.x = p.x; s.player.y = p.y;
+    });
+    charges = 0; wasCharging = false;
+    let follow = false;
+    for (let i = 0; i < 80; i++) {
+      const r = await st();
+      if (r.charging > 0 && !wasCharging) charges++;
+      wasCharging = r.charging > 0;
+      if (r.follow) follow = true;
+      if (charges >= 2 && r.charging <= 0) break;
+      if (r.dizzy > 0 && charges >= 1 && !follow) break;
+      await sleep(120);
+    }
+    console.log("p3 charges in a row:", charges, "follow-up seen:", follow, JSON.stringify(await st()));
+    // Conference call (phase 2) and the pivot (phase 3).
+    const proj = () => ev(() => window.__HT.scene.projectiles.list.filter((p) => p.active && !p.friendly).length);
+    await ev(() => { const b = window.__ceo; b.ceoPhase = 2; b.hp = b.maxHp * 0.5; b.charging = b.chargeWind = b.dizzy = 0; b.chargeCd = 99; b.confCd = 0; });
+    let phones = 0;
+    for (let i = 0; i < 30 && phones === 0; i++) { phones = await ev(() => window.__HT.scene.phoneBombs.length); await sleep(150); }
+    console.log("conference call -> phones on the floor:", phones);
+    await shot("cm03-conference");
+    await ev(() => { const b = window.__ceo; b.ceoPhase = 3; b.hp = b.maxHp * 0.3; b.confCd = 99; b.pivotCd = 0; });
+    const before = await proj();
+    let most = before;
+    for (let i = 0; i < 20; i++) { most = Math.max(most, await proj()); await sleep(100); }
+    console.log("pivot -> enemy projectiles", before, "->", most);
+    await shot("cm04-pivot");
+    // No sprinklers while he's liquidating.
+    const spr = await ev(() => {
+      const s = window.__HT.scene, b = window.__ceo;
+      b.pivotCd = 99;
+      for (let k = 0; k < 30; k++) { const p = s.world.nearestWalkable(s.player.x + (k % 6) * 64 - 160, s.player.y + Math.floor(k / 6) * 64 - 120); s.hazards.paperPatch(p.x, p.y, 1); s.hazards.igniteRadius(p.x, p.y, 70, 3); }
+      s.sprinklerCd = 0;
+      return s.hazards.burningCount;
+    });
+    await sleep(1200);
+    console.log("burning", spr, "->", await ev(() => window.__HT.scene.hazards.burningCount), "sprinklers with the CEO liquidating:", await ev(() => window.__HT.scene.sprinklerT > 0));
+    await ev(() => { window.__ceo.ceoPhase = 2; });
+    await sleep(800);
+    console.log("sprinklers once he's not liquidating:", await ev(() => window.__HT.scene.sprinklerT > 0));
+    // Overnight: the concrete and any speaker that fell off it are back.
+    const night = await ev(() => {
+      const h = window.__HT, s = h.scene;
+      // Knock the first speaker's wall out from under it (as a charge would).
+      const sp = s.speakers.list[0];
+      s.speakers.wallGone(Math.floor(sp.x / 64), Math.floor((sp.y - 34) / 64));
+      const broken = window.__brokenConcrete(), down = s.speakers.list.filter((p) => p.down).length;
+      h.day(2);
+      return { brokenBefore: broken, speakersDown: down, brokenAfter: window.__brokenConcrete(), speakersDownAfter: s.speakers.list.filter((p) => p.down).length };
+    });
+    console.log("overnight repairs", JSON.stringify(night));
   }
 
   if (scenario === "stress") {

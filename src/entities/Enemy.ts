@@ -4,6 +4,7 @@ import { ENEMIES, EnemyDef, EnemyType, standPose } from "../data/enemies";
 
 const HATCHET_BARKS = ["YOU'RE DONE!", "CLEAR YOUR DESK!", "RESTRUCTURING!", "NOTHING PERSONAL!", "THIS IS A CUT!"];
 const CALLER_BARKS = ["CAN YOU HEAR ME NOW?", "LET'S CIRCLE BACK!", "PER MY LAST CALL...", "HOLD, PLEASE!", "IT'S FOR YOU!"];
+const CEO_CHARGE_BARKS = ["HOSTILE TAKEOVER!", "I'M BUYING THIS FLOOR!", "MERGERS AND ACQUISITIONS!", "I OWN THESE WALLS!"];
 import { HOSTILE_BARKS, NPC_IDLE } from "../data/lines";
 import { GameState } from "../systems/GameState";
 import { angleDiff, chance, clamp, lerp, pick, rand } from "../util/math";
@@ -132,6 +133,8 @@ export class Enemy {
   private shiftT = 0;
   private coinCd = 2.2;
   private leapCd = 5;
+  /** Liquidation: the second charge of a pair (he turns round and goes again). */
+  private ceoFollow = false;
   /** Seconds into a leap (0 = on the ground). */
   private leapT = 0;
   private landed = false;
@@ -670,15 +673,19 @@ export class Enemy {
   /**
    * THE HATCHET MAN: stomps, locks on, and charges in a straight line, smashing drywall, glass and
    * furniture. Concrete stops him cold and leaves him dizzy (free hits). Returns true while busy.
+   * The CEO uses it too (his Hostile Takeover): faster, he goes through concrete as well (only the building's outer
+   * walls, the locked room and heavy machines stop him), he can charge at you through walls, and in Liquidation
+   * he turns round and charges again.
    */
   private hatchetAI(dt: number, d: number, dx: number, dy: number): boolean {
     const g = this.g, pl = g.player;
+    const ceo = this.def.bossKind === "ceo", ph = this.ceoPhase;
     if (this.dizzy > 0) {
       this.dizzy -= dt;
       this.vx *= Math.pow(0.02, dt);
       this.vy *= Math.pow(0.02, dt);
       if (chance(dt * 8)) g.fx.burst("spark", this.x + rand(-24, 24), this.y - this.r - 14, 1, 0xe9c25a);
-      if (this.dizzy <= 0) this.chargeCd = rand(1.4, 2.4) * g.dayCfg.bossRate;
+      if (this.dizzy <= 0) this.chargeCd = (ceo ? rand(3.5, 5) : rand(1.4, 2.4)) * g.dayCfg.bossRate;
       return true;
     }
     if (this.charging > 0) {
@@ -686,7 +693,8 @@ export class Enemy {
       this.attackCd -= dt;
       const sp = Math.hypot(this.vx, this.vy) || 1;
       this.facing = Math.atan2(this.vy, this.vx);
-      g.bossSmash(this, this.x + (this.vx / sp) * (this.r + 20), this.y + (this.vy / sp) * (this.r + 20), this.r + 12);
+      g.bossSmash(this, this.x + (this.vx / sp) * (this.r + 20), this.y + (this.vy / sp) * (this.r + 20), this.r + 12, ceo);
+      if (ceo && chance(0.6)) g.fx.burst("spark", this.x - this.vx * 0.03, this.y + this.r * 0.4, 2, 0xe9c25a);
       // Coworkers in the way get bowled over.
       for (const o of g.enemies) {
         if (o === this || o.dead || o.mode === "npc" || o.bowledCd > 0) continue;
@@ -708,23 +716,40 @@ export class Enemy {
         this.vx *= 0.1;
         this.vy *= 0.1;
         if (bonk) {
-          this.dizzy = 2.4;
-          g.fx.shake(0.9);
+          this.ceoFollow = false;
+          this.dizzy = ceo ? 1.6 : 2.4;
+          g.fx.shake(ceo ? 1.2 : 0.9);
+          if (ceo) g.fx.stop(90);
           g.audio.play("stomp", { vol: 0.9 });
           g.audio.play("wall", { vol: 0.8 });
           g.fx.text(this.x, this.y - this.r - 34, "BONK!", { color: "#e9c25a", size: 30, pop: true, dur: 1.1 });
-          g.tipOnce("hatchet", "He's dizzy! Hit him now. Dodge his charges so he slams into concrete walls.", "#e9c25a");
-        } else this.chargeCd = rand(1.2, 2.2) * g.dayCfg.bossRate;
+          if (ceo) g.tipOnce("ceobonk", "He's dizzy! Only the outer walls and heavy machines stop the CEO's charge. Lure him into one.", "#e9c25a");
+          else g.tipOnce("hatchet", "He's dizzy! Hit him now. Dodge his charges so he slams into concrete walls.", "#e9c25a");
+        } else if (ceo && ph >= 3 && !this.ceoFollow) {
+          // Liquidation: he skids, turns round and goes again (a shorter wind-up).
+          this.ceoFollow = true;
+          this.chargeWind = 0.0001;
+        } else {
+          this.ceoFollow = false;
+          this.chargeCd = (ceo ? (ph === 1 ? rand(5.5, 7) : rand(4.2, 5.5)) : rand(1.2, 2.2)) * g.dayCfg.bossRate;
+        }
       }
       return true;
     }
     this.chargeCd -= dt;
-    if ((this.chargeCd <= 0 && this.hasLos && d < 950) || this.chargeWind > 0) {
-      if (this.chargeWind === 0 && g.canBark()) this.say(pick(HATCHET_BARKS), 1.2, "#c4382c");
+    // The CEO knows where you are: close enough, he comes through the wall at you.
+    const canCharge = ceo ? d < 900 && (this.hasLos || d < 650) : this.hasLos && d < 950;
+    if ((this.chargeCd <= 0 && canCharge) || this.chargeWind > 0) {
+      const windT = !ceo ? 1.05 : this.ceoFollow ? 0.5 : ph === 1 ? 1.0 : ph === 2 ? 0.9 : 0.8;
+      if (this.chargeWind === 0) {
+        if (g.canBark() || ceo) this.say(pick(ceo ? CEO_CHARGE_BARKS : HATCHET_BARKS), 1.2, ceo ? "#e9c25a" : "#c4382c");
+        if (ceo) g.tipOnce("ceocharge", "HOSTILE TAKEOVER: the CEO charges straight through walls. Get out of the red lane!", "#e9c25a");
+      }
       this.chargeWind += dt;
       this.vx *= Math.pow(0.02, dt);
       this.vy *= Math.pow(0.02, dt);
-      if (this.chargeWind < 0.75) this.chargeAim = Math.atan2(dy, dx);
+      // He tracks you until just before he goes.
+      if (this.chargeWind < windT - 0.3) this.chargeAim = Math.atan2(dy, dx);
       this.facing = this.chargeAim;
       this.stompT -= dt;
       if (this.stompT <= 0) {
@@ -733,16 +758,21 @@ export class Enemy {
         g.fx.shake(0.1);
         g.fx.burst("smoke", this.x, this.y + this.r * 0.6, 2, 0xd8c3a5);
       }
-      g.drawChargeLane(this.x, this.y, this.chargeAim, this.r, Math.min(1, this.chargeWind / 1.05));
-      if (this.chargeWind > 1.05) {
+      g.drawChargeLane(this.x, this.y, this.chargeAim, this.r, Math.min(1, this.chargeWind / windT));
+      if (this.chargeWind > windT) {
         this.chargeWind = 0;
-        this.charging = 1.6;
+        this.charging = ceo ? 1.25 : 1.6;
         this.stuckTimer = 0;
         this.chargeBlocked = 0;
-        this.vx = Math.cos(this.chargeAim) * 980;
-        this.vy = Math.sin(this.chargeAim) * 980;
+        const speed = ceo ? 1100 : 980;
+        this.vx = Math.cos(this.chargeAim) * speed;
+        this.vy = Math.sin(this.chargeAim) * speed;
         g.audio.play("dodge", { vol: 0.7, rate: 0.5 });
-        g.fx.shake(0.3);
+        g.fx.shake(ceo ? 0.45 : 0.3);
+        if (ceo) {
+          g.audio.play("boom", { vol: 0.35, rate: 1.5 });
+          g.fx.burst("smoke", this.x, this.y + this.r * 0.6, 6, 0xd8c3a5);
+        }
       }
       return true;
     }
@@ -822,10 +852,13 @@ export class Enemy {
   }
 
   /**
-   * THE CEO. Phase 1, Quarterly Review: fans of gold coins and golden-parachute leaps (a red ring marks where he lands).
-   * Phase 2, Restructuring: security on call, two fans at once, and landings that scatter coins. Phase 3, Liquidation:
-   * burning budget reports lobbed at you and the office on fire. Between phases he makes a speech (and can't be hurt).
-   * Returns true while he's busy (speech or leap).
+   * THE CEO: everything the other bosses do, and then some. Phase 1, Quarterly Review: fans of gold coins,
+   * golden-parachute leaps (a red ring marks where he lands) and the Hostile Takeover, the Hatchet Man's charge
+   * except that it goes through any wall inside the building. Phase 2, Restructuring: security on call, two fans at
+   * once, landings that scatter coins, and the Cold Caller's conference call (a ring of exploding phones around you).
+   * Phase 3, Liquidation: burning budget reports, the office on fire (no sprinklers), the Consultant's pivot (a full
+   * ring of coins and memos), and charges in pairs. Between phases he makes a speech (and can't be hurt).
+   * Returns true while he's busy (speech, leap, charge, pivot).
    */
   private ceoAI(dt: number, d: number): boolean {
     const g = this.g, pl = g.player, rate = g.dayCfg.bossRate;
@@ -833,8 +866,14 @@ export class Enemy {
     if (want > this.ceoPhase && this.leapT <= 0 && this.shiftT <= 0) {
       this.ceoPhase = want;
       this.shiftT = 1.8;
+      // The speech cuts any charge short; the new phase's tricks come in on a short delay.
+      this.charging = this.chargeWind = this.dizzy = this.pivotWind = 0;
+      this.ceoFollow = false;
       this.coinCd = Math.max(this.coinCd, 1.2);
       this.leapCd = Math.max(this.leapCd, 2.5);
+      this.chargeCd = Math.max(this.chargeCd, 3);
+      this.confCd = 3.5;
+      this.pivotCd = 5;
       g.ceoPhaseShift(this, want);
     }
     if (this.shiftT > 0) {
@@ -865,8 +904,40 @@ export class Enemy {
       }
       return true;
     }
+    // Hostile Takeover (the charge, and the dizzy spell when he hits something he can't smash).
+    if (this.hatchetAI(dt, d, pl.x - this.x, pl.y - this.y)) {
+      this.leapCd = Math.max(this.leapCd, 1.2);
+      this.pivotCd = Math.max(this.pivotCd, 1);
+      return true;
+    }
+    // Liquidation: the Consultant's pivot, a full ring of coins and memos.
+    if (phase === 3) {
+      this.pivotCd -= dt;
+      if (this.pivotCd <= 0 || this.pivotWind > 0) {
+        if (this.pivotWind <= 0) {
+          this.say("PIVOT!", 1.0, "#e9c25a");
+          g.audio.play("dodge", { vol: 0.5, rate: 0.7 });
+        }
+        this.pivotWind += dt;
+        this.vx *= Math.pow(0.02, dt);
+        this.vy *= Math.pow(0.02, dt);
+        this.facing += dt * 16;
+        if (this.pivotWind > 0.6) {
+          this.pivotWind = 0;
+          this.pivotCd = rand(7, 9) * rate;
+          this.chargeCd = Math.max(this.chargeCd, 1.2);
+          const n = 20, off = rand(0, Math.PI * 2);
+          for (let k = 0; k < n; k++) g.projectiles.fireEnemy(k % 2 ? "coin" : "memo", this.x, this.y, off + (k / n) * Math.PI * 2, 300, 1, this);
+          g.fx.shake(0.35);
+          g.audio.play("paper", { vol: 0.6, rate: 0.8 });
+          g.audio.play("coins", { vol: 0.45 });
+        }
+        return true;
+      }
+    }
     this.leapCd -= dt;
     if (this.leapCd <= 0 && this.hasLos && d < 760) {
+      this.chargeCd = Math.max(this.chargeCd, 2);
       this.leapT = 0.0001;
       this.landed = false;
       this.leapFrom = { x: this.x, y: this.y };
@@ -890,6 +961,21 @@ export class Enemy {
       }
       g.audio.play("coins", { vol: 0.45, minGap: 120 });
       if (chance(0.25) && g.canBark()) this.say(pick(["BONUSES FOR EVERYONE!", "IT'S A PERFORMANCE BONUS!", "SPEND IT WISELY!"]), 1.2, "#e9c25a");
+    }
+    // Restructuring on: the Cold Caller's conference call, a ring of ringing phones around you.
+    if (phase >= 2) {
+      this.confCd -= dt;
+      if (this.confCd <= 0 && d < 820) {
+        this.confCd = (phase === 2 ? rand(9, 11) : rand(7, 9)) * rate;
+        this.throwHide = 0.6;
+        this.say("CONFERENCE CALL!", 1.4, "#e9c25a");
+        g.audio.play("phone", { vol: 0.6 });
+        const n = phase === 2 ? 5 : 7, off = rand(0, Math.PI * 2);
+        for (let k = 0; k < n; k++) {
+          const a = off + (k / n) * Math.PI * 2 + rand(-0.15, 0.15), rr = rand(85, 160);
+          g.projectiles.lobPhone(this.x, this.y, pl.x + Math.cos(a) * rr, pl.y + Math.sin(a) * rr, this);
+        }
+      }
     }
     // Liquidation: burning budget reports, lobbed like grenades.
     if (phase === 3) {

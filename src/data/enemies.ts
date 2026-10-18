@@ -117,8 +117,10 @@ export const ENEMIES: Record<EnemyType, EnemyDef> = {
     sprites: ["manBlue_hold"], scale: 2.0, melee: 2, boss: true, bossKind: "caller", smart: true, tint: 0xd2e2ff, held: "i_phone", heldScale: 0.6,
     ranged: { kind: "phone", dmg: 2, speed: 0, cooldown: 2.3, range: 820, count: 1, spread: 0, keepDist: [300, 500] }
   },
-  // Day 9 (and every 9th day in endless): three phases. Quarterly Review (coin fans, golden-parachute leaps),
-  // Restructuring (security on call, double fans, leaps that scatter coins) and Liquidation (burning reports, the office on fire).
+  // Day 9 (and every 9th day in endless): three phases, and the other bosses' moves on top of his own. Quarterly Review
+  // (coin fans, golden-parachute leaps, the Hostile Takeover charge through any interior wall), Restructuring (security
+  // on call, double fans, leaps that scatter coins, conference calls) and Liquidation (burning reports, the office on
+  // fire with no sprinklers, pivots, charges in pairs).
   ceo: {
     type: "ceo", title: "THE CEO", hp: 2400, speed: 100, radius: 34,
     sprites: ["manOld_hold"], scale: 2.5, melee: 2, boss: true, bossKind: "ceo", smart: true, tint: 0xffe6b0, held: "i_briefcase", heldScale: 0.62

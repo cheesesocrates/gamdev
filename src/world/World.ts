@@ -96,10 +96,10 @@ export class World {
     return !this.tileSolid(Math.floor(x / TILE), Math.floor(y / TILE));
   }
 
-  /** Damages a drywall tile; returns true when it breaks into floor. */
-  damageWall(tx: number, ty: number, amount = 1): boolean {
+  /** Damages a drywall tile (or with `concrete`, a concrete one); returns true when it breaks into floor. */
+  damageWall(tx: number, ty: number, amount = 1, concrete = false): boolean {
     const i = ty * this.w + tx;
-    if (this.tiles[i] !== Tile.DRYWALL) return false;
+    if (this.tiles[i] !== Tile.DRYWALL && !(concrete && this.tiles[i] === Tile.WALL)) return false;
     const hp = (this.wallHp.get(i) ?? 8) - amount;
     if (hp > 0) {
       this.wallHp.set(i, hp);

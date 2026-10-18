@@ -47,7 +47,7 @@ const LORE = [
 
 /** Day 9: the CEO comes down to the floor in person (only that first time: never in endless). */
 const CEO_LINES = [
-  "So. You're the one costing me five salaries.",
+  "So. You're the one costing me multiple employees.",
   "I've read your performance review. Adequate. Barely.",
   "Nothing personal. It's just business.",
   "Let's discuss your severance package."
@@ -426,20 +426,21 @@ export class GameScene extends Phaser.Scene {
     this.hazards.clear();
     this.fx.clearDecals();
     this.stations.resetDay();
-    // Overnight repairs: glass panes and smashed walls come back.
+    // Overnight repairs: glass panes and smashed walls (the CEO's holes in the concrete too) come back.
     for (let i = 0; i < this.map.tiles.length; i++) {
       const t = this.map.tiles[i];
-      if (t !== Tile.GLASS && t !== Tile.DRYWALL) continue;
+      if (t !== Tile.GLASS && t !== Tile.DRYWALL && t !== Tile.WALL) continue;
       if (this.world.tiles[i] === t && t !== Tile.GLASS) continue;
       this.world.tiles[i] = t;
       if (t === Tile.GLASS) this.world.glassHp.set(i, 3);
       this.world.wallHp.delete(i);
-      if (t === Tile.DRYWALL) this.floorLayer.removeTileAt(i % MAP_W, Math.floor(i / MAP_W));
+      if (t !== Tile.GLASS) this.floorLayer.removeTileAt(i % MAP_W, Math.floor(i / MAP_W));
       this.placeWallTile(i % MAP_W, Math.floor(i / MAP_W));
       const above = i - MAP_W;
       if (above >= 0 && this.world.tiles[above] !== Tile.FLOOR) this.placeWallTile(above % MAP_W, Math.floor(above / MAP_W));
     }
     this.world.rebuildNav();
+    this.speakers.repairAll();
     this.props.reset();
     this.vault.setupDay(this.dayCfg.chores);
     this.stations.randomizeProps();
@@ -1611,16 +1612,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Breaks every drywall tile within radius of a point. Returns how many came down. */
-  smashWalls(x: number, y: number, radius: number): number {
+  /** Knocks down drywall (and with `concrete`, the CEO's charge, concrete too) within a radius. Returns how many tiles. */
+  smashWalls(x: number, y: number, radius: number, concrete = false): number {
     let n = 0;
     const r = Math.ceil(radius / TILE) + 1;
     const cx = Math.floor(x / TILE), cy = Math.floor(y / TILE);
     for (let ty = cy - r; ty <= cy + r; ty++) {
       for (let tx = cx - r; tx <= cx + r; tx++) {
-        if (this.world.tile(tx, ty) !== Tile.DRYWALL) continue;
+        const t = this.world.tile(tx, ty);
+        if (t !== Tile.DRYWALL && !(concrete && t === Tile.WALL && !this.wallGuarded(tx, ty))) continue;
         const nx = clamp(x, tx * TILE, (tx + 1) * TILE), ny = clamp(y, ty * TILE, (ty + 1) * TILE);
         if ((nx - x) ** 2 + (ny - y) ** 2 > radius * radius) continue;
-        if (this.world.damageWall(tx, ty, 99)) { this.onWallBroken(tx, ty); n++; }
+        if (this.world.damageWall(tx, ty, 99, concrete)) { this.onWallBroken(tx, ty); n++; }
       }
     }
     if (n) {
@@ -1634,7 +1637,24 @@ export class GameScene extends Phaser.Scene {
     return n;
   }
 
+  /**
+   * Concrete nothing may knock down: the building's outer walls, and anything next to the code-locked room, its door,
+   * a lift or the fire exit.
+   */
+  private wallGuarded(tx: number, ty: number): boolean {
+    if (tx <= 0 || ty <= 0 || tx >= MAP_W - 1 || ty >= MAP_H - 1) return true;
+    const locked = this.vault.lockedZone;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = tx + dx, ny = ty + dy;
+      const t = this.world.tile(nx, ny);
+      if (t === Tile.LOCKED || t === Tile.ELEVATOR || t === Tile.EXIT_DOOR) return true;
+      if (locked >= 0 && this.map.zoneGrid[ny * MAP_W + nx] === locked) return true;
+    }
+    return false;
+  }
+
   private onWallBroken(tx: number, ty: number) {
+    this.speakers.wallGone(tx, ty);
     // The hole takes the floor of whichever room it opened into.
     let mat = Mat.HALL as number;
     for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
@@ -1741,6 +1761,8 @@ export class GameScene extends Phaser.Scene {
     this.ui.setHudMode("none");
     this.ui.setPrompt(null);
     this.ui.setCombo(0, "");
+    // He's here: the PA ("on his way down") stops, so its caption doesn't sit on top of his lines.
+    this.speakers.cancel();
     // The lights come straight up for the big entrance (no fog), and he strolls out of the lift while he talks.
     this.vision.reset();
     for (const e of this.enemies) e.vis = 1;
@@ -1901,7 +1923,9 @@ export class GameScene extends Phaser.Scene {
         this.fx.burst("fire", p.x, p.y, 12);
       }
       this.fx.shake(0.5);
-      this.speakers.say(["Attention all staff. The building is on fire. Please continue working."], { chime: "down" });
+      // He's had the sprinklers cut, and the music picks up.
+      this.audio.setMusicRate(1.1);
+      this.speakers.say(["Attention all staff. The building is on fire. The sprinkler budget has been liquidated. Please continue working."], { chime: "down" });
     }
   }
 
@@ -1927,8 +1951,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** A charging boss hits whatever is ahead of it: drywall, glass, furniture, traps. */
-  bossSmash(e: Enemy, x: number, y: number, r: number) {
-    this.smashWalls(x, y, r);
+  bossSmash(e: Enemy, x: number, y: number, r: number, concrete = false) {
+    this.smashWalls(x, y, r, concrete);
     const tr = Math.ceil(r / TILE) + 1, cx = Math.floor(x / TILE), cy = Math.floor(y / TILE);
     for (let ty = cy - tr; ty <= cy + tr; ty++) for (let tx = cx - tr; tx <= cx + tr; tx++) {
       if (this.world.tile(tx, ty) !== Tile.GLASS) continue;
@@ -2761,7 +2785,10 @@ export class GameScene extends Phaser.Scene {
       }
       return;
     }
-    if (this.sprinklerCd <= 0 && this.hazards.burningCount >= 18) this.activateSprinklers("SPRINKLERS ACTIVATED", "Fire's out. Floor's wet. Mind the power strips.");
+    // (Not while the CEO is liquidating: he had the sprinklers cut.)
+    const b = this.waves.boss;
+    const liquidating = !!b && !b.dead && b.def.bossKind === "ceo" && b.ceoPhase >= 3;
+    if (this.sprinklerCd <= 0 && this.hazards.burningCount >= 18 && !liquidating) this.activateSprinklers("SPRINKLERS ACTIVATED", "Fire's out. Floor's wet. Mind the power strips.");
   }
 
   /** Ceiling sprinklers: douse the fires and leave small puddles all over the office. */
